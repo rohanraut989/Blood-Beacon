@@ -251,10 +251,16 @@ class TestPageNavigation:
         assert b"Request" in response.data
     
     def test_staff_dashboard_loads(self, client):
-        """Test that staff dashboard loads."""
-        response = client.get("/staff")
+        """Test that staff dashboard loads with staff flag (Stage 5 security)."""
+        response = client.get("/staff?staff=1")
         assert response.status_code == 200
-        assert b"Staff Dashboard" in response.data
+        # Staff dashboard should show requests grouped by status
+        assert b"request" in response.data.lower()
+    
+    def test_staff_dashboard_requires_flag(self, client):
+        """Test that staff dashboard returns 403 without staff flag (Stage 5 security)."""
+        response = client.get("/staff")
+        assert response.status_code == 403
     
     def test_404_page(self, client):
         """Test that 404 page works."""

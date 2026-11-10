@@ -76,6 +76,12 @@ def get_donors_by_city(city: str) -> list:
     result = db.table("donors").select("*").eq("city", city).execute()
     return result.data if result.data else []
 
+def get_all_donors() -> list:
+    """Get all donors."""
+    db = get_db()
+    result = db.table("donors").select("*").execute()
+    return result.data if result.data else []
+
 # === REQUESTS ===
 
 def insert_request(patient_name: str, blood_group: str, component: str,
@@ -220,3 +226,38 @@ def update_alert_showup(alert_id: int, showed_up: bool) -> dict:
         "showed_up": showed_up,
     }).eq("id", alert_id).execute()
     return result.data[0] if result.data else None
+
+# === REQUEST STATUS UPDATES (Stage 5+) ===
+
+def update_request_status(request_id: int, new_status: str, verified_by: str = None) -> dict:
+    """Update a request status and optionally record who verified it."""
+    db = get_db()
+    update_data = {"status": new_status}
+    if verified_by:
+        update_data["verified_by"] = verified_by
+    result = db.table("requests").update(update_data).eq("id", request_id).execute()
+    return result.data[0] if result.data else None
+
+def verify_request(request_id: int, staff_name: str) -> dict:
+    """Verify a request. Set status to 'verified' and record staff name."""
+    return update_request_status(request_id, "verified", staff_name)
+
+def reject_request(request_id: int, staff_name: str, reason: str = None) -> dict:
+    """Reject a request. Set status to 'rejected' and log the action."""
+    db = get_db()
+    result = update_request_status(request_id, "rejected", staff_name)
+    if result:
+        insert_audit_log(
+            actor=staff_name,
+            action="reject_request",
+            entity="request",
+            entity_id=request_id,
+            detail=f"Rejected. Reason: {reason}" if reason else "Rejected"
+        )
+    return result
+
+def get_requests_by_status(status: str) -> list:
+    """Get all requests with a given status."""
+    db = get_db()
+    result = db.table("requests").select("*").eq("status", status).order("created_at", desc=True).execute()
+    return result.data if result.data else []

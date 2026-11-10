@@ -59,6 +59,10 @@ def get_donors_by_group_and_city(blood_group, city):
 def get_donors_by_city(city):
     return [d for d in _test_donors.values() if d["city"] == city]
 
+def get_all_donors():
+    """Get all donors."""
+    return list(_test_donors.values())
+
 # === REQUESTS ===
 
 def insert_request(patient_name, blood_group, component, units, hospital_name, city, needed_by, contact_phone, created_by):
@@ -197,3 +201,36 @@ def update_alert_showup(alert_id, showed_up):
         _test_alerts[alert_id]["showed_up"] = showed_up
         return _test_alerts[alert_id]
     return None
+
+# === REQUEST STATUS UPDATES (Stage 5+) ===
+
+def update_request_status(request_id, new_status, verified_by=None):
+    """Update a request status."""
+    if request_id in _test_requests:
+        _test_requests[request_id]["status"] = new_status
+        if verified_by:
+            _test_requests[request_id]["verified_by"] = verified_by
+        return _test_requests[request_id]
+    return None
+
+def verify_request(request_id, staff_name):
+    """Verify a request."""
+    return update_request_status(request_id, "verified", staff_name)
+
+def reject_request(request_id, staff_name, reason=None):
+    """Reject a request."""
+    result = update_request_status(request_id, "rejected", staff_name)
+    if result:
+        # Also log it
+        insert_audit_log(
+            actor=staff_name,
+            action="reject_request",
+            entity="request",
+            entity_id=request_id,
+            detail=f"Rejected. Reason: {reason}" if reason else "Rejected"
+        )
+    return result
+
+def get_requests_by_status(status):
+    """Get all requests with a given status."""
+    return [r for r in _test_requests.values() if r["status"] == status]

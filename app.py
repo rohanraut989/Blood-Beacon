@@ -161,9 +161,14 @@ def request_status(request_id):
         alerts=alert_details
     )
 
-@app.route("/request/<int:request_id>/activate", methods=["POST"])
-def activate_request(request_id):
-    """Activate a request and send Wave 1 alerts (simulator channel)."""
+# === STAGE 5 VERIFICATION WORKFLOW ===
+
+@app.route("/request/<int:request_id>/verify", methods=["POST"])
+def verify_request_route(request_id):
+    """Verify a pending request (staff only)."""
+    if not request.args.get("staff") == "1":
+        return ("", 403)
+    
     if not db.is_db_configured():
         flash("Database not configured.", "error")
         return redirect(url_for("home"))
@@ -173,10 +178,71 @@ def activate_request(request_id):
         flash("Request not found.", "error")
         return redirect(url_for("home"))
     
-    # Only pending_verification requests can be activated
     if req["status"] != "pending_verification":
-        flash("Request must be pending verification to activate.", "error")
+        flash("Only pending requests can be verified.", "error")
         return redirect(url_for("request_status", request_id=request_id, staff=1))
+    
+    staff_name = request.form.get("staff_name", "Unknown Staff")
+    db.verify_request(request_id, staff_name)
+    db.insert_audit_log(
+        actor=staff_name,
+        action="verify_request",
+        entity="request",
+        entity_id=request_id,
+        detail="Request verified and ready for activation"
+    )
+    
+    flash("Request verified successfully.", "success")
+    return redirect(url_for("request_status", request_id=request_id, staff=1))
+
+@app.route("/request/<int:request_id>/reject", methods=["POST"])
+def reject_request_route(request_id):
+    """Reject a pending request (staff only)."""
+    if not request.args.get("staff") == "1":
+        return ("", 403)
+    
+    if not db.is_db_configured():
+        flash("Database not configured.", "error")
+        return redirect(url_for("home"))
+
+    req = db.get_request(request_id)
+    if not req:
+        flash("Request not found.", "error")
+        return redirect(url_for("home"))
+    
+    if req["status"] != "pending_verification":
+        flash("Only pending requests can be rejected.", "error")
+        return redirect(url_for("request_status", request_id=request_id, staff=1))
+    
+    staff_name = request.form.get("staff_name", "Unknown Staff")
+    reason = request.form.get("reason", "No reason provided")
+    db.reject_request(request_id, staff_name, reason)
+    
+    flash(f"Request rejected. Reason: {reason}", "info")
+    return redirect(url_for("request_status", request_id=request_id, staff=1))
+
+@app.route("/request/<int:request_id>/activate", methods=["POST"])
+def activate_request(request_id):
+    """Activate a request and send Wave 1 alerts (simulator channel)."""
+    if not request.args.get("staff") == "1":
+        return ("", 403)
+    
+    if not db.is_db_configured():
+        flash("Database not configured.", "error")
+        return redirect(url_for("home"))
+
+    req = db.get_request(request_id)
+    if not req:
+        flash("Request not found.", "error")
+        return redirect(url_for("home"))
+    
+    # Only verified requests can be activated
+    if req["status"] != "verified":
+        if req["status"] == "pending_verification":
+            return ("", 409)
+        else:
+            flash(f"Request cannot be activated (status: {req['status']}).", "error")
+            return redirect(url_for("request_status", request_id=request_id, staff=1))
     
     # Get eligible donors and rank them
     all_donors = db.get_donors_by_city(req["city"])
@@ -255,6 +321,9 @@ def activate_request(request_id):
 @app.route("/request/<int:request_id>/advance", methods=["POST"])
 def advance_simulation(request_id):
     """Advance the simulator: process pending replies and fire Wave 2 if needed."""
+    if not request.args.get("staff") == "1":
+        return ("", 403)
+    
     if not db.is_db_configured():
         flash("Database not configured.", "error")
         return redirect(url_for("home"))
@@ -372,6 +441,9 @@ def advance_simulation(request_id):
 @app.route("/request/<int:request_id>/donor/<int:donor_id>/mark-donated", methods=["POST"])
 def mark_donated(request_id, donor_id):
     """Mark a confirmed donor as having donated."""
+    if not request.args.get("staff") == "1":
+        return ("", 403)
+    
     if not db.is_db_configured():
         flash("Database not configured.", "error")
         return redirect(url_for("home"))
@@ -507,15 +579,191 @@ def match_preview(request_id):
 
 # === STAFF ===
 
+# === STAGE 5 STAFF DASHBOARD ===
+
 @app.route("/staff")
 def staff_dashboard():
-    """Staff dashboard (placeholder for Stage 2)."""
+    """Staff dashboard showing request queue grouped by status."""
+    if not request.args.get("staff") == "1":
+        return ("", 403)
+    
     if not db.is_db_configured():
         flash("Database not configured.", "error")
         return redirect(url_for("home"))
+    
+    # Get requests grouped by status
+    all_requests = db.get_all_requests()
+    
+    requests_by_status = {
+        "pending_verification": [],
+        "verified": [],
+        "active": [],
+        "fulfilled": [],
+        "rejected": [],
+    }
+    
+    for req in all_requests:
+        status = req.get("status", "pending_verification")
+        if status in requests_by_status:
+            requests_by_status[status].append(req)
+    
+    return render_template(
+        "staff_dashboard.html",
+        requests_by_status=requests_by_status,
+        is_staff=True
+    )
 
-    requests_list = db.get_all_requests()
-    return render_template("staff_dashboard.html", requests=requests_list)
+@app.route("/staff/donors")
+def staff_donor_directory():
+    """Staff donor directory with eligibility badges."""
+    if not request.args.get("staff") == "1":
+        return ("", 403)
+    
+    if not db.is_db_configured():
+        flash("Database not configured.", "error")
+        return redirect(url_for("home"))
+    
+    # Get all donors and filter
+    all_donors = db.get_all_donors()
+    
+    blood_group = request.args.get("blood_group", "")
+    city = request.args.get("city", "")
+    
+    if blood_group:
+        all_donors = [d for d in all_donors if d.get("blood_group") == blood_group]
+    if city:
+        all_donors = [d for d in all_donors if d.get("city") == city]
+    
+    # Assess eligibility for each donor
+    rules_list = db.get_all_rules()
+    rules_dict = {r["key"]: r["value"] for r in rules_list}
+    today = date.today()
+    
+    donor_with_badges = []
+    for donor in all_donors:
+        donations = db.get_donations_for_donor(donor["id"])
+        assessment = eligibility.assess_donor(donor, donations, rules_dict, today)
+        donor_info = dict(donor)
+        donor_info["eligibility_badge"] = f"{assessment['status'].title()}"
+        if assessment.get("eligible_on"):
+            donor_info["eligible_on"] = assessment["eligible_on"]
+        donor_info["reasons"] = assessment.get("reasons", [])
+        donor_with_badges.append(donor_info)
+    
+    return render_template(
+        "staff_donors.html",
+        donors=donor_with_badges,
+        is_staff=True
+    )
+
+@app.route("/staff/experiment", methods=["GET", "POST"])
+def experiment_mode():
+    """Experiment mode: compare alerting strategies on synthetic donors."""
+    if not request.args.get("staff") == "1":
+        return ("", 403)
+    
+    if not db.is_db_configured():
+        flash("Database not configured.", "error")
+        return redirect(url_for("home"))
+    
+    if request.method == "GET":
+        return render_template("experiment_mode.html", is_staff=True)
+    
+    # POST: run experiment
+    try:
+        pool_size = int(request.form.get("pool_size", 100))
+        units_needed = int(request.form.get("units_needed", 2))
+        trials = int(request.form.get("trials", 20))
+        seed = int(request.form.get("seed", 42))
+    except (ValueError, TypeError):
+        flash("Invalid parameters.", "error")
+        return redirect(url_for("experiment_mode", staff=1))
+    
+    import random as py_random
+    py_random.seed(seed)
+    
+    results = {
+        "broadcast": {"alerts_sent": [], "time_to_fulfill": [], "success_rate": []},
+        "waves": {"alerts_sent": [], "time_to_fulfill": [], "success_rate": []},
+    }
+    
+    # Run trials
+    for trial in range(trials):
+        # Generate synthetic donor pool
+        synthetic_donors = []
+        for _ in range(pool_size):
+            synthetic_donors.append({
+                "id": py_random.randint(10000, 99999),
+                "name": f"Synthetic_{py_random.randint(1, 9999)}",
+                "blood_group": py_random.choice(["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"]),
+                "predicted_score": py_random.random(),
+            })
+        
+        # Simulate Broadcast (alert all at once)
+        seeded_rng = py_random.Random(seed + trial)
+        confirmations_broadcast = 0
+        for donor in synthetic_donors:
+            if alerting.determine_reply(donor, donor["predicted_score"], seeded_rng) == "confirmed":
+                confirmations_broadcast += 1
+            if confirmations_broadcast >= units_needed:
+                break
+        
+        results["broadcast"]["alerts_sent"].append(len(synthetic_donors))
+        results["broadcast"]["time_to_fulfill"].append(10)  # One wave window
+        results["broadcast"]["success_rate"].append(1.0 if confirmations_broadcast >= units_needed else 0.0)
+        
+        # Simulate Waves (top 10, then next 20)
+        sorted_donors = sorted(synthetic_donors, key=lambda d: d["predicted_score"], reverse=True)
+        seeded_rng = py_random.Random(seed + trial)
+        
+        confirmations_wave1 = 0
+        alerts_sent_w1 = min(10, len(sorted_donors))
+        for donor in sorted_donors[:10]:
+            if alerting.determine_reply(donor, donor["predicted_score"], seeded_rng) == "confirmed":
+                confirmations_wave1 += 1
+            if confirmations_wave1 >= units_needed:
+                break
+        
+        time_wave = 10 if confirmations_wave1 >= units_needed else 20
+        alerts_sent_total = alerts_sent_w1
+        confirmations_total = confirmations_wave1
+        
+        if confirmations_wave1 < units_needed and len(sorted_donors) > 10:
+            alerts_sent_w2 = min(20, len(sorted_donors) - 10)
+            for donor in sorted_donors[10:30]:
+                if alerting.determine_reply(donor, donor["predicted_score"], seeded_rng) == "confirmed":
+                    confirmations_total += 1
+                if confirmations_total >= units_needed:
+                    break
+            alerts_sent_total = alerts_sent_w1 + alerts_sent_w2
+        
+        results["waves"]["alerts_sent"].append(alerts_sent_total)
+        results["waves"]["time_to_fulfill"].append(time_wave)
+        results["waves"]["success_rate"].append(1.0 if confirmations_total >= units_needed else 0.0)
+    
+    # Calculate averages
+    summary = {
+        "broadcast": {
+            "avg_alerts": sum(results["broadcast"]["alerts_sent"]) / max(len(results["broadcast"]["alerts_sent"]), 1),
+            "avg_time": sum(results["broadcast"]["time_to_fulfill"]) / max(len(results["broadcast"]["time_to_fulfill"]), 1),
+            "avg_success": sum(results["broadcast"]["success_rate"]) / max(len(results["broadcast"]["success_rate"]), 1),
+        },
+        "waves": {
+            "avg_alerts": sum(results["waves"]["alerts_sent"]) / max(len(results["waves"]["alerts_sent"]), 1),
+            "avg_time": sum(results["waves"]["time_to_fulfill"]) / max(len(results["waves"]["time_to_fulfill"]), 1),
+            "avg_success": sum(results["waves"]["success_rate"]) / max(len(results["waves"]["success_rate"]), 1),
+        },
+    }
+    
+    return render_template(
+        "experiment_results.html",
+        summary=summary,
+        pool_size=pool_size,
+        units_needed=units_needed,
+        trials=trials,
+        seed=seed,
+        is_staff=True
+    )
 
 # === ERROR HANDLERS ===
 
