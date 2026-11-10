@@ -1164,3 +1164,10 @@ Prove the WhatsApp outbound path: Wave 1 alerts written with channel="whatsapp",
 ### Next Steps
 
 Ready for deployment. All staff UX improvements complete and tested.
+
+> **Schema audit lesson:** The mock database accepted `verified_by` as a staff-name
+> string even while `schema.sql` declared it `BIGINT`; Supabase had already been
+> corrected manually to `TEXT`. The schema is now aligned with the live write path.
+> The audit also found that application code writes the `verified` request status,
+> so that value is now included in the schema check constraint. All other `BIGINT`
+> identifiers and foreign keys match the numeric IDs written by the application.

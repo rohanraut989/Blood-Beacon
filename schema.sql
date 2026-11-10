@@ -44,9 +44,9 @@ CREATE TABLE IF NOT EXISTS requests (
   city TEXT NOT NULL,
   needed_by TIMESTAMP WITH TIME ZONE,
   contact_phone TEXT,
-  status TEXT NOT NULL DEFAULT 'pending_verification' CHECK (status IN ('pending_verification', 'active', 'fulfilled', 'closed', 'rejected')),
+  status TEXT NOT NULL DEFAULT 'pending_verification' CHECK (status IN ('pending_verification', 'verified', 'active', 'fulfilled', 'closed', 'rejected')),
   created_by TEXT NOT NULL CHECK (created_by IN ('public', 'staff')),
-  verified_by BIGINT,
+  verified_by TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
