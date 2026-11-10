@@ -122,3 +122,61 @@ def test_late_reply_after_fulfilment_gets_one_completed_close(client):
         if "already been completed" in call.kwargs["json"]["message"]
     ]
     assert len(closes) == 1
+
+
+def test_fresh_exact_match_donor_with_no_history_is_asked(client):
+    donor = mock_db.insert_donor(
+        name="Fresh Exact", blood_group="A+", city="Kathmandu",
+        area="Center", phone="919876543299", gender="M",
+        date_of_birth="1990-01-01", weight_kg=70,
+    )
+    req = mock_db.insert_request(
+        patient_name="A Patient", blood_group="A+", component="whole_blood",
+        units=1, hospital_name="Hospital", city="Kathmandu",
+        needed_by="2027-01-01", contact_phone="919999999999", created_by="test",
+    )
+    mock_db.verify_request(req["id"], "system")
+    with patch("app.requests.post", return_value=MagicMock(status_code=200)):
+        client.post(f"/request/{req['id']}/activate?staff=1&channel=whatsapp")
+    alerts = mock_db.get_alerts_for_request(req["id"])
+    assert len(alerts) == 1
+    assert alerts[0]["donor_id"] == donor["id"]
+
+
+def test_fresh_exact_donor_survives_predictor_failure(client):
+    donor = mock_db.insert_donor(
+        name="Fresh Predictor Fallback", blood_group="A+", city="Kathmandu",
+        area="Center", phone="919876543298", gender="M",
+        date_of_birth="1990-01-01", weight_kg=70,
+    )
+    req = mock_db.insert_request(
+        patient_name="A Patient", blood_group="A+", component="whole_blood",
+        units=1, hospital_name="Hospital", city="Kathmandu",
+        needed_by="2027-01-01", contact_phone="919999999998", created_by="test",
+    )
+    mock_db.verify_request(req["id"], "system")
+    with patch("app.predictor.score_donor", side_effect=ValueError("model unavailable")):
+        client.post(f"/request/{req['id']}/activate?staff=1&channel=simulator")
+    alerts = mock_db.get_alerts_for_request(req["id"])
+    assert len(alerts) == 1
+    assert alerts[0]["donor_id"] == donor["id"]
+
+
+def test_registration_refills_existing_zero_match_request(client):
+    req = mock_db.insert_request(
+        patient_name="A Patient", blood_group="A+", component="whole_blood",
+        units=1, hospital_name="Hospital", city="Kathmandu",
+        needed_by="2027-01-01", contact_phone="919999999997", created_by="test",
+    )
+    mock_db.verify_request(req["id"], "system")
+    with patch("app.requests.post", return_value=MagicMock(status_code=200)):
+        client.post(f"/request/{req['id']}/activate?staff=1&channel=whatsapp")
+        assert mock_db.get_alerts_for_request(req["id"]) == []
+        client.post("/register", data={
+            "name": "New A Donor", "blood_group": "A+", "city": "Kathmandu",
+            "area": "Center", "country": "91", "phone": "9876543296",
+            "gender": "M", "date_of_birth": "1990-01-01", "weight_kg": "70",
+        })
+    alerts = mock_db.get_alerts_for_request(req["id"])
+    assert len(alerts) == 1
+    assert alerts[0]["cross_group"] is False

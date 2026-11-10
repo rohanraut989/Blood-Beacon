@@ -122,6 +122,7 @@ def register_donor():
                     date_of_birth=date_of_birth,
                     weight_kg=weight_kg
                 )
+                _reevaluate_open_requests_for_donor(donor)
                 try:
                     welcome_message = (
                         f"🩸 Welcome to BloodBeacon, {name.split()[0]}! Thank you for "
@@ -410,6 +411,30 @@ def _evaluate_cascade(request_id, channel=None):
         )
 
 
+def _reevaluate_open_requests_for_donor(donor):
+    """Refill active requests when a newly registered donor becomes eligible."""
+    for req in db.get_all_requests():
+        if req.get("status") != "active":
+            continue
+        if not compatibility.is_compatible(
+            donor.get("blood_group"),
+            req.get("blood_group"),
+            req.get("component", "whole_blood"),
+        ):
+            continue
+        before = len(db.get_alerts_for_request(req["id"]))
+        _evaluate_cascade(req["id"])
+        after = len(db.get_alerts_for_request(req["id"]))
+        if after > before:
+            db.insert_audit_log(
+                actor="system",
+                action="cascade_advanced",
+                entity="request",
+                entity_id=req["id"],
+                detail=f"New donor {donor.get('id')} registered; cascade reevaluated",
+            )
+
+
 @app.route("/request/<int:request_id>")
 def request_status(request_id):
     """Show the status of a blood request."""
@@ -648,18 +673,33 @@ def _ranked_match_pool(req):
     eligible_by_tier = {1: [], 2: [], 3: []}
     donations_by_donor = {}
     alerts_by_donor = {}
+    exclusions = []
 
     for donor in db.get_all_donors():
-        if not compatibility.is_compatible(
-            donor["blood_group"], req["blood_group"], req.get("component", "whole_blood")
-        ):
+        donor_id = donor.get("id", "?")
+        try:
+            if not compatibility.is_compatible(
+                donor["blood_group"], req["blood_group"], req.get("component", "whole_blood")
+            ):
+                exclusions.append((donor_id, "incompatible blood group"))
+                continue
+        except (KeyError, ValueError, TypeError) as error:
+            exclusions.append((donor_id, f"compatibility error: {error}"))
             continue
-        donations = db.get_donations_for_donor(donor["id"])
-        donations_by_donor[donor["id"]] = donations
-        alerts = db.get_alerts_for_donor(donor["id"])
-        alerts_by_donor[donor["id"]] = alerts
-        assessment = eligibility.assess_donor(donor, donations, rules_dict, today)
+        try:
+            donations = db.get_donations_for_donor(donor_id) or []
+            donations_by_donor[donor_id] = donations
+            alerts = db.get_alerts_for_donor(donor_id) or []
+            alerts_by_donor[donor_id] = alerts
+            assessment = eligibility.assess_donor(donor, donations, rules_dict, today)
+        except (KeyError, ValueError, TypeError, AttributeError) as error:
+            exclusions.append((donor_id, f"eligibility/history error: {error}"))
+            continue
         if assessment["status"] != "eligible":
+            exclusions.append((
+                donor_id,
+                "; ".join(assessment.get("reasons") or ["deferred"]),
+            ))
             continue
         donor_info = dict(donor)
         donor_info["eligibility_status"] = assessment["status"]
@@ -671,10 +711,21 @@ def _ranked_match_pool(req):
 
     ranked = []
     for tier in (1, 2, 3):
-        ranked.extend(predictor.rank_donors(
-            req, eligible_by_tier[tier], donations_by_donor,
-            alerts_by_donor, today
-        ))
+        try:
+            ranked.extend(predictor.rank_donors(
+                req, eligible_by_tier[tier], donations_by_donor,
+                alerts_by_donor, today
+            ))
+        except (FileNotFoundError, OSError, ValueError, TypeError, KeyError) as error:
+            # Keep pool construction fail-open if a legacy model or one
+            # malformed history row breaks the batch rank operation.
+            print(f"Predictor batch fallback for tier {tier}: {type(error).__name__}: {error}")
+            ranked.extend((donor, 0.5, "neutral history") for donor in eligible_by_tier[tier])
+    if exclusions:
+        print(
+            f"Match pool request {req.get('id')}: "
+            + ", ".join(f"donor {donor_id}: {reason}" for donor_id, reason in exclusions)
+        )
     return ranked, alerts_by_donor, sum(len(donors) for donors in eligible_by_tier.values())
 
 
