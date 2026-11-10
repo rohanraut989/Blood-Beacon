@@ -129,6 +129,19 @@ def request_blood():
 
 # === REQUEST STATUS ===
 
+def _get_bridge_status():
+    """Check WhatsApp bridge connection status."""
+    try:
+        bridge_url = os.getenv("BRIDGE_URL", "http://127.0.0.1:3100")
+        response = requests.get(f"{bridge_url}/status", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("status", "unknown")
+        return "not connected"
+    except Exception:
+        return "not connected"
+
+
 @app.route("/request/<int:request_id>")
 def request_status(request_id):
     """Show the status of a blood request."""
@@ -154,12 +167,16 @@ def request_status(request_id):
         alert_with_donor = dict(alert)
         alert_with_donor["donor"] = donor
         alert_details.append(alert_with_donor)
+    
+    # Get bridge status for staff view
+    bridge_status = _get_bridge_status() if is_staff else None
 
     return render_template(
         "request_status.html",
         request=req,
         is_staff=is_staff,
-        alerts=alert_details
+        alerts=alert_details,
+        bridge_status=bridge_status
     )
 
 # === STAGE 5 VERIFICATION WORKFLOW ===
@@ -251,7 +268,7 @@ def close_request_route(request_id):
 
 @app.route("/request/<int:request_id>/activate", methods=["POST"])
 def activate_request(request_id):
-    """Activate a request and send Wave 1 alerts (simulator channel)."""
+    """Activate a request and send Wave 1 alerts."""
     if not request.args.get("staff") == "1":
         return ("", 403)
     
@@ -322,15 +339,22 @@ def activate_request(request_id):
     # Activate request
     db.update_request_status(request_id, "active")
     
-    # Write Wave 1 alerts
+    # Determine channel (whatsapp for real requests, simulator for testing)
+    channel = request.args.get("channel", "whatsapp")  # Default to whatsapp
+    
+    # Write Wave 1 alerts and send messages
     wave1_donors = plan["wave1"]
     for donor in wave1_donors:
         db.insert_alert(
             request_id=request_id,
             donor_id=donor["id"],
             wave_no=1,
-            channel="simulator"
+            channel=channel
         )
+        
+        # If WhatsApp channel, send message via bridge
+        if channel == "whatsapp":
+            _send_whatsapp_alert(donor, req)
     
     # Write audit log
     db.insert_audit_log(
@@ -338,11 +362,32 @@ def activate_request(request_id):
         action="activate_request",
         entity="request",
         entity_id=request_id,
-        detail=f"Activated with Wave 1: {len(wave1_donors)} donors, Wave 2: {len(plan['wave2'])} donors queued"
+        detail=f"Activated with Wave 1: {len(wave1_donors)} donors on {channel}, Wave 2: {len(plan['wave2'])} donors queued"
     )
     
     flash(f"Request activated! {len(wave1_donors)} donors alerted in Wave 1.", "success")
     return redirect(url_for("request_status", request_id=request_id, staff=1))
+
+
+def _send_whatsapp_alert(donor, req):
+    """Send WhatsApp alert to a donor."""
+    try:
+        bridge_url = os.getenv("BRIDGE_URL", "http://127.0.0.1:3100")
+        bridge_secret = os.getenv("BRIDGE_SECRET", "")
+        
+        message = f"BloodBeacon: {req.get('blood_group')} blood needed at {req.get('hospital_name')}. Reply 1 (I can donate), 2 (I donated recently), or 3 (Not now)."
+        
+        response = requests.post(
+            f"{bridge_url}/send",
+            json={"phone": donor["phone"], "message": message},
+            headers={"X-Bridge-Secret": bridge_secret},
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            print(f"Failed to send WhatsApp alert to {donor['id']}: {response.status_code}")
+    except Exception as e:
+        print(f"Error sending WhatsApp alert to {donor['id']}: {e}")
 
 # === STAGE 4 SIMULATOR ===
 
@@ -445,13 +490,20 @@ def advance_simulation(request_id):
         wave1_donor_ids = set(a["donor_id"] for a in wave1_alerts)
         wave2_donors = [d for d in plan["wave2"] if d["id"] not in wave1_donor_ids]
         
+        # Get channel from Wave 1 (for Wave 2 alerts)
+        wave1_channel = wave1_alerts[0].get("channel", "simulator") if wave1_alerts else "simulator"
+        
         for donor in wave2_donors:
             db.insert_alert(
                 request_id=request_id,
                 donor_id=donor["id"],
                 wave_no=2,
-                channel="simulator"
+                channel=wave1_channel
             )
+            
+            # If WhatsApp channel, send message via bridge
+            if wave1_channel == "whatsapp":
+                _send_whatsapp_alert(donor, req)
         
         # Write audit log
         db.insert_audit_log(
@@ -459,7 +511,7 @@ def advance_simulation(request_id):
             action="fire_wave2",
             entity="request",
             entity_id=request_id,
-            detail=f"Wave 1 had {confirmed_count}/{req.get('units', 1)} confirmations, firing Wave 2 with {len(wave2_donors)} donors"
+            detail=f"Wave 1 had {confirmed_count}/{req.get('units', 1)} confirmations, firing Wave 2 with {len(wave2_donors)} donors on {wave1_channel}"
         )
         
         flash(f"Wave 1 had {confirmed_count} confirmations (needed {req.get('units', 1)}). Firing Wave 2 with {len(wave2_donors)} donors.", "info")

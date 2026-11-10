@@ -9,18 +9,20 @@ _test_donations = {}
 _test_requests = {}
 _test_rules = {}
 _test_audit_log = {}
+_test_staff = {}
 
 _id_counter = {"donors": 0, "donations": 0, "requests": 0, "rules": 0, "audit_log": 0}
 
 def reset():
     """Clear all test data."""
-    global _test_donors, _test_donations, _test_requests, _test_rules, _test_audit_log, _test_alerts, _id_counter
+    global _test_donors, _test_donations, _test_requests, _test_rules, _test_audit_log, _test_alerts, _test_staff, _id_counter
     _test_donors = {}
     _test_donations = {}
     _test_requests = {}
     _test_rules = {}
     _test_audit_log = {}
     _test_alerts = {}
+    _test_staff = {}
     _id_counter = {"donors": 0, "donations": 0, "requests": 0, "rules": 0, "audit_log": 0}
 
 def is_db_configured():
@@ -183,7 +185,7 @@ def insert_alert(request_id, donor_id, wave_no, channel):
         "reply": None,
         "replied_at": None,
         "showed_up": None,
-        "created_at": "2024-01-01T00:00:00Z",
+        "created_at": "2024-01-01",  # Date format only for alerting.py parsing
     }
     _test_alerts[alert["id"]] = alert
     return alert
@@ -255,3 +257,19 @@ def close_request(request_id, staff_name, reason=None):
             detail=f"Closed. Reason: {reason}" if reason else "Closed"
         )
     return result
+
+# === STAFF ===
+
+def insert_staff(username, password):
+    """Insert a staff member."""
+    staff = {
+        "username": username,
+        "password": password,
+        "created_at": "2024-01-01T00:00:00Z"
+    }
+    _test_staff[username] = staff
+    return staff
+
+def get_staff(username):
+    """Get a staff member."""
+    return _test_staff.get(username)

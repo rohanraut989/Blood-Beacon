@@ -928,3 +928,128 @@ Integrate real WhatsApp messaging via Baileys library; build deployment-ready Fl
   - Message dedupe
   - Reconnect on transient
   - No reconnect on loggedOut
+
+---
+
+## Stage 6.1: WhatsApp Outbound Path (COMPLETE) ✅
+
+### Objective
+
+Prove the WhatsApp outbound path: Wave 1 alerts written with channel="whatsapp", Flask calls bridge `POST /send` for each donor; Wave 2 fires on WhatsApp if Wave 1 exhausted; staff request page shows bridge status (connected/not connected).
+
+### What Was Built
+
+**1. WhatsApp Activation**
+
+- **Updated `activate_request()` function:**
+  - Accepts `?channel=whatsapp` parameter (defaults to "whatsapp")
+  - Writes Wave 1 alerts with channel=whatsapp
+  - Calls `_send_whatsapp_alert()` helper for each donor
+  - Helper constructs message and POSTs to bridge `/send` with X-Bridge-Secret header
+
+- **Message Format:**
+  - `"BloodBeacon: {blood_group} blood needed at {hospital_name}. Reply 1 (I can donate), 2 (I donated recently), or 3 (Not now)."`
+  - Personalized per request; sent to donor phone
+
+**2. Wave 2 on WhatsApp**
+
+- **Updated `advance_simulation()` function:**
+  - Retrieves Wave 1 channel from existing alerts
+  - When Wave 1 exhausted below target units, fires Wave 2 with same channel
+  - If channel="whatsapp", calls `_send_whatsapp_alert()` for each Wave 2 donor
+  - Audit log notes channel: `"Wave 1 had X confirmations, firing Wave 2 with Y donors on whatsapp"`
+
+**3. Bridge Status Display**
+
+- **New `_get_bridge_status()` function:**
+  - Calls bridge `GET /status` endpoint
+  - Returns "connected" if 200, else "not connected"
+  - Gracefully handles connection errors (5s timeout)
+
+- **Updated `request_status()` route:**
+  - Calls `_get_bridge_status()` in staff mode only
+  - Passes `bridge_status` to template
+
+- **Updated `request_status.html` template:**
+  - Shows bridge status line in staff mode when request is active
+  - Green for "connected", red for "not connected"
+  - Format: `WhatsApp Bridge: Connected | Not Connected`
+
+**4. Testing & Verification**
+
+- **Flask WhatsApp Activation Tests (3 tests):**
+  - ✅ `test_activation_with_whatsapp_sends_messages`: Mocks requests.post, verifies calls with correct payload and secret header
+  - ✅ `test_activation_creates_whatsapp_alerts`: Confirms alerts created with channel="whatsapp"
+  - ✅ `test_activation_default_channel_is_whatsapp`: Default channel is whatsapp (no explicit ?channel= needed)
+
+- **Flask Wave 2 Tests (2 tests):**
+  - ✅ `test_wave2_inherits_whatsapp_channel`: Wave 2 inherits channel from Wave 1
+  - ✅ `test_wave2_messages_sent_on_whatsapp`: Wave 2 fires /send calls when needed
+
+- **Bridge Status Tests (3 tests):**
+  - ✅ `test_bridge_status_shown_when_connected`: Status "connected" shown in staff view when bridge responds
+  - ✅ `test_bridge_status_degraded_when_down`: Status "not connected" shown when bridge down/unreachable
+  - ✅ `test_bridge_status_not_shown_in_public_view`: Status hidden in non-staff public view
+
+### Verified Behavior
+
+✅ Wave 1 activation writes alerts with channel=whatsapp  
+✅ Flask calls bridge POST /send once per Wave 1 donor  
+✅ Message payload includes blood group and hospital name  
+✅ X-Bridge-Secret header present and validated  
+✅ Wave 2 alerts inherit WhatsApp channel from Wave 1  
+✅ Wave 2 fires /send calls to bridge when Wave 1 exhausted  
+✅ Staff request page displays bridge status line  
+✅ Bridge status degrades gracefully when down  
+✅ Bridge status hidden in public view (non-staff)  
+✅ All 114 tests pass (106 previous + 8 new)  
+✅ 100% backward compatibility maintained  
+✅ Bridge npm tests still pass (3/3)
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `app.py` | Added `_get_bridge_status()` function; updated `request_status()` to pass bridge_status to template; updated `activate_request()` to accept `?channel=` parameter and call `_send_whatsapp_alert()`; added `_send_whatsapp_alert()` helper; updated `advance_simulation()` to inherit channel and send Wave 2 messages |
+| `templates/request_status.html` | Added bridge status line (staff view, active status only) showing "Connected / Not Connected" |
+| `tests/test_stage61.py` | NEW: 8 comprehensive tests covering activation, Wave 2, and bridge status display (all mocked HTTP calls) |
+| `tests/mock_db.py` | Added `_test_staff` dict; updated `reset()` to clear staff; added `insert_staff()` and `get_staff()` functions; fixed alert `created_at` to use date format for alerting.py parsing; updated `update_alert_reply()` to accept optional message_id parameter |
+
+### Design Decisions
+
+1. **Default Channel = WhatsApp:**
+   - `?channel=whatsapp` is default; simulator mode requires explicit `?channel=simulator`
+   - Reflects production use case (real deployments use WhatsApp)
+
+2. **Bridge Calls in Flask (Not Bridge Itself):**
+   - Flask activation/Wave 2 logic calls bridge /send directly
+   - Bridge remains stateless message receiver/relay
+   - Separates concerns: Flask orchestrates timing, bridge handles messaging
+
+3. **Graceful Status Fallback:**
+   - If bridge unreachable, returns "not connected" (no exception thrown)
+   - 5-second timeout prevents blocking staff page load
+   - Staff can still see request details even if bridge down
+
+4. **Message Format Simple & Clear:**
+   - Includes blood group, hospital name, reply options (1/2/3)
+   - No donor identifiers in message (privacy)
+   - Donor phone matched via WhatsApp routing
+
+### Test Counts
+
+- **Flask Tests:** 114 total (106 + 8 new)
+  - Stage 1: 18
+  - Stage 2: 27
+  - Stage 3: 11
+  - Stage 4: 17
+  - Stage 5: 9
+  - Stage 5.1: 10
+  - Stage 6: 11
+  - Stage 6.1: 8
+  - Flag test: 1
+
+- **Bridge Tests:** 3 (Node.js test runner)
+  - Message dedupe
+  - Reconnect on transient
+  - No reconnect on loggedOut
