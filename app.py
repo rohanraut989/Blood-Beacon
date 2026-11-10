@@ -122,6 +122,24 @@ def register_donor():
                     date_of_birth=date_of_birth,
                     weight_kg=weight_kg
                 )
+                try:
+                    welcome_message = (
+                        f"🩸 Welcome to BloodBeacon, {name.split()[0]}! Thank you for "
+                        f"registering as a {blood_group} blood donor in {city}. If someone "
+                        f"near you urgently needs your blood, we will message you on this "
+                        f"number. Your one reply can save a life. ❤️"
+                    )
+                    welcome_sent = _send_whatsapp_message(phone, welcome_message)
+                    db.insert_audit_log(
+                        actor="system",
+                        action="welcome_msg_sent" if welcome_sent else "welcome_msg_failed",
+                        entity="donor",
+                        entity_id=donor["id"],
+                        detail="Registration welcome message delivered"
+                        if welcome_sent else "Registration succeeded but bridge welcome message failed",
+                    )
+                except Exception as error:
+                    print(f"Welcome message audit failed for donor {donor['id']}: {error}")
                 flash(f"Welcome, {name}! You have been registered as a donor.", "success")
                 return redirect(url_for("home"))
             else:
@@ -459,8 +477,11 @@ def _send_whatsapp_message(phone, message):
         )
         if response.status_code != 200:
             print(f"Failed to send WhatsApp message to {phone}: {response.status_code}")
+            return False
+        return True
     except Exception as e:
         print(f"Error sending WhatsApp message to {phone}: {e}")
+        return False
 
 def _send_whatsapp_alert(donor, req):
     """Send the first step of the donor conversation."""

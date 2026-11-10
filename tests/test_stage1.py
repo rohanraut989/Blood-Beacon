@@ -6,6 +6,7 @@ Tests for schema, seed data, and basic functionality.
 import pytest
 import sys
 import os
+from unittest.mock import MagicMock, patch
 
 # Add parent directory to path so we can import the app and mock_db
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -104,8 +105,10 @@ class TestDonorRegistration:
         assert response.status_code == 200
         assert b"Register as a Donor" in response.data
     
-    def test_donor_registration_success(self, client):
+    @patch("app.requests.post")
+    def test_donor_registration_success(self, mock_post, client):
         """Test successful donor registration."""
+        mock_post.return_value = MagicMock(status_code=200)
         response = client.post("/register", data={
             "name": "Test Donor",
             "blood_group": "B+",
@@ -120,8 +123,14 @@ class TestDonorRegistration:
         assert response.status_code == 200
         assert b"registered as a donor" in response.data or b"Welcome" in response.data
         assert mock_db.get_all_donors()[-1]["phone"] == "919999999999"
+        assert mock_post.call_count == 1
+        assert mock_post.call_args.kwargs["json"]["phone"] == "919999999999"
+        assert "🩸 Welcome to BloodBeacon, Test!" in mock_post.call_args.kwargs["json"]["message"]
+        assert mock_db.get_audit_log()[-1]["action"] == "welcome_msg_sent"
 
-    def test_donor_registration_nepal_stores_digits_only(self, client):
+    @patch("app.requests.post")
+    def test_donor_registration_nepal_stores_digits_only(self, mock_post, client):
+        mock_post.return_value = MagicMock(status_code=200)
         response = client.post("/register", data={
             "name": "Nepal Donor",
             "blood_group": "O+",
@@ -136,6 +145,25 @@ class TestDonorRegistration:
 
         assert response.status_code == 200
         assert mock_db.get_all_donors()[-1]["phone"] == "9779817612738"
+
+    @patch("app.requests.post", side_effect=TimeoutError("bridge offline"))
+    def test_donor_registration_succeeds_when_welcome_bridge_fails(self, mock_post, client):
+        response = client.post("/register", data={
+            "name": "Offline Donor",
+            "blood_group": "A+",
+            "city": "Kathmandu",
+            "area": "Thamel",
+            "country": "977",
+            "phone": "9817612738",
+            "gender": "Female",
+            "date_of_birth": "1995-01-01",
+            "weight_kg": "60"
+        }, follow_redirects=True)
+
+        assert response.status_code == 200
+        assert b"registered as a donor" in response.data or b"Welcome" in response.data
+        assert mock_db.get_all_donors()[-1]["phone"] == "9779817612738"
+        assert mock_db.get_audit_log()[-1]["action"] == "welcome_msg_failed"
 
     def test_donor_registration_rejects_short_mobile(self, client):
         response = client.post("/register", data={
@@ -152,6 +180,13 @@ class TestDonorRegistration:
 
         assert b"exactly 10" in response.data
         assert mock_db.get_all_donors() == []
+
+    @patch("app._send_whatsapp_message")
+    def test_seed_does_not_send_welcome_messages(self, mock_send, client):
+        import seed
+
+        assert seed.seed_database() is True
+        mock_send.assert_not_called()
     
     def test_donor_registration_missing_fields(self, client):
         """Test registration with missing required fields."""

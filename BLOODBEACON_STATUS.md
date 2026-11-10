@@ -1215,3 +1215,14 @@ This closes a live-test failure where a stored `+977...` value produced an
 invalid WhatsApp JID and the alert disappeared. Focused Python coverage and
 bridge tests verify India, Nepal, pasted country-code input, short-number
 rejection, and JID normalization.
+
+---
+
+## WhatsApp Registration Welcome
+
+After a real donor registration is saved, the app makes one best-effort
+`/send` call to the existing bridge using the stored digits-only number. The
+message includes the donor's first name, blood group, and city. A successful
+send records `welcome_msg_sent`; an offline, timed-out, or failed bridge
+records `welcome_msg_failed`. Neither outcome blocks or changes the normal
+registration success path. Seed data and test fixtures do not send welcomes.
