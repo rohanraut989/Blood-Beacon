@@ -185,6 +185,10 @@ def get_audit_logs_for_entity(entity: str, entity_id: int) -> list:
     ).order("created_at", desc=True).execute()
     return result.data if result.data else []
 
+def get_recent_audit_logs(limit: int = 25) -> list:
+    result = get_db().table("audit_log").select("*").order("created_at", desc=True).limit(limit).execute()
+    return result.data if result.data else []
+
 # === ALERTS (Stage 3+) ===
 
 def get_alerts_for_donor(donor_id: int) -> list:
@@ -246,6 +250,13 @@ def update_alert_showup(alert_id: int, showed_up: bool) -> dict:
         "showed_up": showed_up,
     }).eq("id", alert_id).execute()
     return result.data[0] if result.data else None
+
+def cancel_alerts_for_request(request_id: int) -> list:
+    result = get_db().table("alerts").update({
+        "stage": "done",
+        "reply": "no_reply",
+    }).eq("request_id", request_id).neq("stage", "done").execute()
+    return result.data if result.data else []
 
 # === REQUEST STATUS UPDATES (Stage 5+) ===
 

@@ -1288,3 +1288,13 @@ offset timestamps, and Python date/datetime objects. The activation path now
 uses it for donor birth dates and donations in `eligibility.py`, donation and
 alert history in `predictor.py`, and alert history in `alerting.py`; the
 request display formatter also remains tolerant of full ISO timestamps.
+## Automatic lifecycle and staff console
+
+Public request submission now performs the existing verification and activation
+steps automatically, preserving the invariant that activation only accepts a
+verified request. Wave 2 is event-driven: it is evaluated after terminal donor
+replies and when the public status page is loaded; no scheduler is used.
+
+Staff monitoring is isolated behind `/staff` and a demo-grade `STAFF_PASSCODE`
+session gate. Public pages do not link to staff surfaces. Production deployment
+must replace this passcode with real staff accounts and authorization.

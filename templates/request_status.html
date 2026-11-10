@@ -62,91 +62,26 @@
 </div>
 
 {% if request.status == 'pending_verification' %}
-    <div class="alert warning">
-        ⏳ This request is pending verification by hospital staff. Donors will be alerted once verified.
-    </div>
-
-    <div style="background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-        <h3 style="color: #333; margin-bottom: 15px;">🔍 Verification</h3>
-        
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-            <form method="POST" action="/request/{{ request.id }}/verify?staff=1" style="margin: 0;">
-                <input type="hidden" name="staff_name" value="Staff Member">
-                <button type="submit" style="
-                    width: 100%;
-                    padding: 10px;
-                    background-color: #28a745;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    font-size: 14px;
-                ">✅ Verify Request</button>
-            </form>
-
-            <form method="POST" action="/request/{{ request.id }}/reject?staff=1" style="margin: 0;">
-                <input type="hidden" name="staff_name" value="Staff Member">
-                <input type="hidden" name="reason" value="Rejected by staff verification">
-                <button type="submit" style="
-                    width: 100%;
-                    padding: 10px;
-                    background-color: #dc3545;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    font-size: 14px;
-                ">❌ Reject Request</button>
-            </form>
-        </div>
-    </div>
-{% elif is_staff and request.status == 'verified' %}
-    <div class="alert" style="background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba;">
-        ✅ Request verified and ready to activate.
-    </div>
-    {% if bridge_status %}
-        <div style="margin-top: 15px; padding: 12px; background: #f8f9fa; border-radius: 4px; font-size: 13px;">
-            <strong>WhatsApp Bridge:</strong>
-            <span style="{% if bridge_status.label == 'connected' %}color: #28a745;{% else %}color: #dc3545;{% endif %}">
-                {{ bridge_status.label|replace('_', ' ')|title }}
-            </span>
-            {% if bridge_status.error %}<small>({{ bridge_status.error }})</small>{% endif %}
-        </div>
-    {% endif %}
-    <form method="POST" action="/request/{{ request.id }}/activate?staff=1&channel=whatsapp" style="margin-top: 15px;">
-        <button type="submit" class="btn">Activate — start Wave 1</button>
-    </form>
-    <a href="/match/{{ request.id }}" class="btn" style="background: #0c5460; margin-top: 15px;">View Donor Matches</a>
-{% elif is_staff and request.status == 'active' %}
+    <div class="alert warning">Your request is being prepared. Donors will be alerted shortly.</div>
+{% elif request.status == 'active' %}
     <div class="alert" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb;">
-        ✅ Request verified and active. Donors are being alerted in waves.
+        Your request is live — donors are being alerted.
     </div>
-    {% if bridge_status %}
-        <div style="margin-top: 15px; padding: 12px; background: #f8f9fa; border-radius: 4px; font-size: 13px;">
-            <strong>WhatsApp Bridge:</strong>
-            <span style="{% if bridge_status.label == 'connected' %}color: #28a745;{% else %}color: #dc3545;{% endif %}">
-                {{ bridge_status.label|replace('_', ' ')|title }}
-            </span>
-            {% if bridge_status.error %}<small>({{ bridge_status.error }})</small>{% endif %}
-        </div>
-    {% endif %}
-    <a href="/match/{{ request.id }}" class="btn" style="background: #0c5460; margin-top: 15px;">View Donor Matches</a>
     <div style="margin-top: 15px;">
-        <strong>Wave status:</strong> {{ alerts|length }} alert{{ '' if alerts|length == 1 else 's' }} sent
+        <strong>Donor alerts:</strong> {{ alerts|length }}
     </div>
-    {% if wave_outcome %}
-        <div class="alert" style="margin-top: 15px;">
-            {{ wave_outcome }}
-        </div>
-    {% endif %}
-    <form method="POST" action="/request/{{ request.id }}/advance?staff=1" style="margin-top: 15px;">
-        <button type="submit" class="btn">Advance Wave</button>
+    <form method="POST" action="/request/{{ request.id }}/fulfill" style="margin-top: 15px;">
+        <button type="submit" class="btn">Mark as fulfilled</button>
     </form>
-    <form method="POST" action="/request/{{ request.id }}/close?staff=1" style="margin-top: 10px;">
-        <button type="submit" class="btn" style="background: #6c757d;">Close Request</button>
+    <form method="POST" action="/request/{{ request.id }}/close-public" style="margin-top: 10px;">
+        <button type="submit" class="btn" style="background: #6c757d;">Close request</button>
     </form>
+{% elif request.status == 'verified' %}
+    <div class="alert">Your request is live — donors are being alerted.</div>
+{% elif request.status == 'fulfilled' %}
+    <div class="alert">This request has been marked as fulfilled.</div>
+{% elif request.status == 'closed' %}
+    <div class="alert">This request is closed.</div>
 {% endif %}
 
 <div class="link-group" style="margin-top: 20px;">

@@ -172,6 +172,39 @@ def request_blood():
                 flash("All fields are required.", "error")
                 return redirect(url_for("request_blood"))
 
+            try:
+                needed_dt = datetime.fromisoformat(needed_by.replace("Z", "+00:00"))
+            except ValueError:
+                flash("Needed By must be a valid date and time.", "error")
+                return redirect(url_for("request_blood"))
+            current_time = datetime.now(needed_dt.tzinfo) if needed_dt.tzinfo else datetime.now()
+            if needed_dt <= current_time:
+                flash("Needed By must be in the future.", "error")
+                return redirect(url_for("request_blood"))
+            normalized_contact = "".join(character for character in contact_phone if character.isdigit())
+            now = datetime.now()
+            recent_requests = db.get_all_requests()
+            contact_requests = [
+                candidate for candidate in recent_requests
+                if "".join(character for character in str(candidate.get("contact_phone", "")) if character.isdigit())
+                == normalized_contact
+            ]
+            if any(candidate.get("status") == "active" for candidate in contact_requests):
+                flash("This contact already has an active request.", "error")
+                return redirect(url_for("request_blood"))
+            recent_cutoff = now.timestamp() - 24 * 60 * 60
+            recent_count = 0
+            for candidate in contact_requests:
+                try:
+                    created = datetime.fromisoformat(str(candidate.get("created_at", "")).replace("Z", "+00:00"))
+                    if created.timestamp() >= recent_cutoff:
+                        recent_count += 1
+                except ValueError:
+                    continue
+            if recent_count >= 3:
+                flash("This contact has reached the 24-hour request limit.", "error")
+                return redirect(url_for("request_blood"))
+
             if db.is_db_configured():
                 req = db.insert_request(
                     patient_name=patient_name,
@@ -184,9 +217,18 @@ def request_blood():
                     contact_phone=contact_phone,
                     created_by="public"
                 )
+                db.verify_request(req["id"], "system (auto)")
+                db.insert_audit_log(
+                    actor="system",
+                    action="verify_request",
+                    entity="request",
+                    entity_id=req["id"],
+                    detail="Automatically verified on public submission"
+                )
+                activate_request(req["id"], _internal=True)
                 flash(
                     f"Request submitted for {patient_name}. "
-                    f"Status: Pending Verification (id: {req['id']})",
+                    f"Status: Active — donors are being alerted (id: {req['id']})",
                     "success"
                 )
                 return redirect(url_for("request_status", request_id=req["id"]))
@@ -223,6 +265,19 @@ def _get_bridge_status():
     except Exception as error:
         return {"label": "not connected", "error": str(error)}
 
+def _maybe_auto_advance(request_id):
+    req = db.get_request(request_id)
+    if not req or req.get("status") != "active":
+        return
+    alerts = db.get_alerts_for_request(request_id)
+    wave1 = [alert for alert in alerts if alert.get("wave_no") == 1]
+    wave2 = [alert for alert in alerts if alert.get("wave_no") == 2]
+    if wave1 and not wave2 and all(
+        alert.get("reply") is not None or alert.get("stage") == "done"
+        for alert in wave1
+    ):
+        advance_simulation(request_id, _internal=True)
+
 
 @app.route("/request/<int:request_id>")
 def request_status(request_id):
@@ -236,8 +291,9 @@ def request_status(request_id):
         flash("Request not found.", "error")
         return redirect(url_for("home"))
 
-    # Check if staff mode is enabled, also preserving a prior staff session.
-    staff_mode = is_staff()
+    _maybe_auto_advance(request_id)
+    req = db.get_request(request_id)
+    staff_mode = False
     
     # Get alerts for this request (if any)
     alerts = db.get_alerts_for_request(request_id)
@@ -250,25 +306,15 @@ def request_status(request_id):
         alert_with_donor["donor"] = donor
         alert_details.append(alert_with_donor)
 
-    wave_outcome = None
-    if staff_mode:
-        audit_logs = db.get_audit_logs_for_entity("request", request_id)
-        activation = next(
-            (entry for entry in audit_logs if entry.get("action") == "activate_request"),
-            None,
-        )
-        wave_outcome = activation.get("detail") if activation else None
-    
-    # Get bridge status for staff view
-    bridge_status = _get_bridge_status() if staff_mode else None
-
     return render_template(
         "request_status.html",
         request=req,
-        is_staff=staff_mode,
+        is_staff=False,
         alerts=alert_details,
-        bridge_status=bridge_status,
-        wave_outcome=wave_outcome,
+        confirmed_donors=[
+            alert["donor"] for alert in alert_details
+            if alert.get("reply") == "confirmed" and alert.get("donor")
+        ],
     )
 
 # === STAGE 5 VERIFICATION WORKFLOW ===
@@ -336,37 +382,46 @@ def reject_request_route(request_id):
 @app.route("/request/<int:request_id>/close", methods=["POST"])
 def close_request_route(request_id):
     """Close an active or verified request (staff only)."""
-    staff_check = require_staff()
-    if staff_check:
-        return staff_check
-    
-    if not db.is_db_configured():
-        flash("Database not configured.", "error")
-        return redirect(url_for("home"))
-
     req = db.get_request(request_id)
-    if not req:
-        flash("Request not found.", "error")
-        return redirect(url_for("home"))
-    
-    # Can close active or verified requests
+    if not session.get("staff_console") or not req:
+        return ("Staff access required.", 403)
     if req["status"] not in ["active", "verified"]:
-        flash(f"Can only close active or verified requests (current: {req['status']}).", "error")
-        return redirect(url_for("request_status", request_id=request_id, staff=1))
-    
-    staff_name = request.form.get("staff_name", "Unknown Staff")
-    reason = request.form.get("reason", "No reason provided")
-    db.close_request(request_id, staff_name, reason)
-    
-    flash(f"Request closed. Reason: {reason}", "info")
-    return redirect(url_for("request_status", request_id=request_id, staff=1))
+        return redirect(url_for("request_status", request_id=request_id))
+    db.cancel_alerts_for_request(request_id)
+    db.close_request(request_id, "staff", "Closed by staff console")
+    return redirect(url_for("staff_dashboard"))
+
+@app.route("/request/<int:request_id>/close-public", methods=["POST"])
+def close_public_request(request_id):
+    req = db.get_request(request_id)
+    if not req or req.get("status") not in ("active", "verified"):
+        return redirect(url_for("request_status", request_id=request_id))
+    db.cancel_alerts_for_request(request_id)
+    db.close_request(request_id, "receiver", "Closed by receiver")
+    return redirect(url_for("request_status", request_id=request_id))
+
+@app.route("/request/<int:request_id>/fulfill", methods=["POST"])
+def fulfill_public_request(request_id):
+    req = db.get_request(request_id)
+    if not req or req.get("status") != "active":
+        return redirect(url_for("request_status", request_id=request_id))
+    db.update_request_status(request_id, "fulfilled")
+    db.insert_audit_log(
+        actor="receiver",
+        action="fulfill_request",
+        entity="request",
+        entity_id=request_id,
+        detail="Marked fulfilled by receiver",
+    )
+    return redirect(url_for("request_status", request_id=request_id))
 
 @app.route("/request/<int:request_id>/activate", methods=["POST"])
-def activate_request(request_id):
+def activate_request(request_id, _internal=False):
     """Activate a request and send Wave 1 alerts."""
-    staff_check = require_staff()
-    if staff_check:
-        return staff_check
+    if not _internal:
+        staff_check = require_staff()
+        if staff_check:
+            return staff_check
     
     if not db.is_db_configured():
         flash("Database not configured.", "error")
@@ -534,11 +589,12 @@ _WHATSAPP_VERIFY_PROMPT = (
 # === STAGE 4 SIMULATOR ===
 
 @app.route("/request/<int:request_id>/advance", methods=["POST"])
-def advance_simulation(request_id):
+def advance_simulation(request_id, _internal=False):
     """Advance the simulator: process pending replies and fire Wave 2 if needed."""
-    staff_check = require_staff()
-    if staff_check:
-        return staff_check
+    if not _internal:
+        staff_check = require_staff()
+        if staff_check:
+            return staff_check
     
     if not db.is_db_configured():
         flash("Database not configured.", "error")
@@ -681,7 +737,7 @@ def advance_simulation(request_id):
         
         flash(f"Wave 1 had {confirmed_count} confirmations (needed {req.get('units', 1)}). Firing Wave 2 with {len(wave2_donors)} donors.", "info")
     
-    return redirect(url_for("request_status", request_id=request_id, staff=1))
+    return redirect(url_for("request_status", request_id=request_id))
 
 @app.route("/request/<int:request_id>/donor/<int:donor_id>/mark-donated", methods=["POST"])
 def mark_donated(request_id, donor_id):
@@ -829,16 +885,9 @@ def match_preview(request_id):
 
 @app.route("/staff")
 def staff_dashboard():
-    """Staff dashboard showing request queue grouped by status."""
-    staff_check = require_staff()
-    if staff_check:
-        return staff_check
-    
-    if not db.is_db_configured():
-        flash("Database not configured.", "error")
-        return redirect(url_for("home"))
-    
-    # Get requests grouped by status
+    """Standalone demo-grade staff console."""
+    if not session.get("staff_console"):
+        return render_template("staff_console.html", authenticated=False)
     all_requests = db.get_all_requests()
     
     requests_by_status = {
@@ -847,18 +896,38 @@ def staff_dashboard():
         "active": [],
         "fulfilled": [],
         "rejected": [],
+        "closed": [],
     }
     
     for req in all_requests:
         status = req.get("status", "pending_verification")
+        req["confirmed_donors"] = [
+            db.get_donor(alert["donor_id"])
+            for alert in db.get_alerts_for_request(req["id"])
+            if alert.get("reply") == "confirmed"
+        ]
+        req["wave_outcomes"] = [
+            entry for entry in db.get_audit_logs_for_entity("request", req["id"])
+            if entry.get("action") in ("activate_request", "fire_wave2")
+        ]
         if status in requests_by_status:
             requests_by_status[status].append(req)
     
     return render_template(
-        "staff_dashboard.html",
+        "staff_console.html",
         requests_by_status=requests_by_status,
-        is_staff=True
+        donors=db.get_all_donors(),
+        audit_logs=db.get_recent_audit_logs(),
+        authenticated=True,
     )
+
+@app.route("/staff/login", methods=["POST"])
+def staff_login():
+    expected = os.environ.get("STAFF_PASSCODE")
+    if not expected or request.form.get("passcode") != expected:
+        return render_template("staff_console.html", authenticated=False), 403
+    session["staff_console"] = True
+    return redirect(url_for("staff_dashboard"))
 
 @app.route("/staff/donors")
 def staff_donor_directory():
@@ -1131,6 +1200,15 @@ def whatsapp_reply():
         request_obj = db.get_request(matching_alert["request_id"])
         if not request_obj:
             return {"status": "request_not_found"}, 200
+        if request_obj.get("status") == "closed":
+            db.insert_audit_log(
+                actor="whatsapp_donor",
+                action="reply_to_closed_request",
+                entity="request",
+                entity_id=request_obj["id"],
+                detail=f"Ignored reply from {phone!r}",
+            )
+            return {"status": "request_closed"}, 200
         
         stage = matching_alert.get("stage", "awaiting_recency")
         if stage == "awaiting_recency":
@@ -1198,7 +1276,6 @@ def whatsapp_reply():
                         entity_id=matching_alert["id"],
                         detail=receiver_details
                     )
-
         # Re-evaluate request: check if fulfilled
         confirmed_count = 0
         alerts_for_request = db.get_alerts_for_request(matching_alert["request_id"])
@@ -1223,10 +1300,7 @@ def whatsapp_reply():
         wave2_alerts = [a for a in alerts_for_request if a["wave_no"] == 2]
         
         if len(wave2_alerts) == 0 and confirmed_count < request_obj.get("units", 1):
-            # Wave 1 exhausted, units still needed: fire Wave 2 via WhatsApp
-            # (This mirrors the simulator advance_simulation logic)
-            # For now, just log it; Wave 2 firing happens in advance_simulation or separate logic
-            pass
+            _maybe_auto_advance(matching_alert["request_id"])
         
         return {"status": "reply_recorded", "reply": processed_reply}, 200
     

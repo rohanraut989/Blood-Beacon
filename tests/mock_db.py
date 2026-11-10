@@ -168,6 +168,9 @@ def get_audit_logs_for_entity(entity, entity_id):
         if entry["entity"] == entity and entry["entity_id"] == entity_id
     ][::-1]
 
+def get_recent_audit_logs(limit=25):
+    return list(_test_audit_log.values())[::-1][:limit]
+
 # === ALERTS (Stage 3+) ===
 
 def get_alerts_for_donor(donor_id):
@@ -228,6 +231,15 @@ def update_alert_showup(alert_id, showed_up):
         _test_alerts[alert_id]["showed_up"] = showed_up
         return _test_alerts[alert_id]
     return None
+
+def cancel_alerts_for_request(request_id):
+    cancelled = []
+    for alert in _test_alerts.values():
+        if alert["request_id"] == request_id and alert["stage"] != "done":
+            alert["stage"] = "done"
+            alert["reply"] = "no_reply"
+            cancelled.append(alert)
+    return cancelled
 
 # === REQUEST STATUS UPDATES (Stage 5+) ===
 

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}BloodBeacon Staff Console{% endblock %}
+{% block content %}
+<h1>Staff console</h1>
+{% if not authenticated %}
+<p>Enter the staff passcode.</p>
+<form method="POST" action="/staff/login">
+  <label for="passcode">Passcode</label>
+  <input id="passcode" name="passcode" type="password" required>
+  <button class="btn" type="submit">Enter</button>
+</form>
+{% else %}
+<p>Monitoring console. Staff authentication is demo-grade; production requires real accounts.</p>
+{% for status, requests in requests_by_status.items() %}
+<h2>{{ status|replace('_', ' ')|title }}</h2>
+{% if requests %}
+<ul>
+{% for req in requests %}
+<li>
+  <strong>{{ req.patient_name }}</strong> — {{ req.city }} —
+  {{ req.status }}
+  {% if req.confirmed_donors %} — confirmed:
+    {% for donor in req.confirmed_donors %}{{ donor.first_name }}{% if not loop.last %}, {% endif %}{% endfor %}
+  {% endif %}
+  {% for outcome in req.wave_outcomes %}<div>{{ outcome.detail }}</div>{% endfor %}
+  {% if req.status == 'active' %}
+  <form method="POST" action="/request/{{ req.id }}/close" style="display:inline">
+    <input type="hidden" name="staff" value="1">
+    <button type="submit">Close request</button>
+  </form>
+  {% endif %}
+</li>
+{% endfor %}
+</ul>
+{% else %}<p>None.</p>{% endif %}
+{% endfor %}
+<h2>Donor directory</h2>
+<ul>{% for donor in donors %}<li>{{ donor.first_name }} {{ donor.last_name }} — {{ donor.blood_group }} — {{ donor.city }}</li>{% endfor %}</ul>
+<h2>Recent audit log</h2>
+<ul>{% for entry in audit_logs %}<li>{{ entry.action }} — {{ entry.detail }}</li>{% endfor %}</ul>
+{% endif %}
+{% endblock %}
