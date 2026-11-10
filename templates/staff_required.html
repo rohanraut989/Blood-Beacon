@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Staff Access Required - BloodBeacon{% endblock %}
+
+{% block content %}
+<div style="max-width: 600px; margin: 60px auto; text-align: center; padding: 40px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px;">
+    <h2 style="color: #856404; margin-bottom: 20px;">🔒 Staff Access Required</h2>
+    
+    <p style="color: #856404; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+        This page is for staff only.
+    </p>
+    
+    <div style="background: #fff; padding: 20px; border-radius: 4px; margin-bottom: 20px; font-family: monospace; font-size: 14px; color: #333;">
+        <p style="margin: 10px 0;">
+            Add <strong>?staff=1</strong> to the address:<br>
+            <code style="color: #d9534f;">{{ request.path }}?staff=1</code>
+        </p>
+    </div>
+    
+    <p style="color: #856404; margin-top: 20px; font-size: 14px;">
+        <a href="/" style="color: #856404; text-decoration: underline;">← Back to Home</a>
+    </p>
+</div>
+{% endblock %}

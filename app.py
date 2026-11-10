@@ -7,7 +7,7 @@ import os
 import random
 import requests
 from datetime import datetime, date
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 import db
 import eligibility
 import compatibility
@@ -18,6 +18,54 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
 
 PORT = int(os.getenv("PORT", 5001))
+
+# === JINJA2 FILTERS ===
+
+@app.template_filter('human_date')
+def format_human_date(value):
+    """Convert ISO date/timestamp to human-readable format (e.g., '10 Nov 2026, 10:55 PM')."""
+    if not value:
+        return ""
+    try:
+        if isinstance(value, str):
+            # Handle ISO date format (2026-11-10)
+            if len(value) == 10:
+                dt = datetime.strptime(value, "%Y-%m-%d")
+            # Handle ISO datetime format (2026-11-10T10:55:00)
+            elif "T" in value:
+                dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            else:
+                return value
+        else:
+            dt = value
+        return dt.strftime("%d %b %Y, %I:%M %p").lstrip("0").replace(" 0", " ")
+    except (ValueError, AttributeError):
+        return value
+
+@app.template_filter('unit_int')
+def format_unit_int(value):
+    """Format unit as whole number (1, not 1.0)."""
+    if value is None:
+        return ""
+    try:
+        return str(int(float(value)))
+    except (ValueError, TypeError):
+        return str(value)
+
+# === STAFF SESSION MANAGEMENT ===
+
+def is_staff():
+    """Check if user has staff access via flag or session."""
+    if request.args.get("staff") == "1":
+        session["staff"] = True
+        return True
+    return session.get("staff", False)
+
+def require_staff():
+    """Return 403 with friendly message if not staff."""
+    if not is_staff():
+        return render_template("staff_required.html"), 403
+    return None
 
 # === HOME ===
 
@@ -184,8 +232,9 @@ def request_status(request_id):
 @app.route("/request/<int:request_id>/verify", methods=["POST"])
 def verify_request_route(request_id):
     """Verify a pending request (staff only)."""
-    if not request.args.get("staff") == "1":
-        return ("", 403)
+    staff_check = require_staff()
+    if staff_check:
+        return staff_check
     
     if not db.is_db_configured():
         flash("Database not configured.", "error")
@@ -216,8 +265,9 @@ def verify_request_route(request_id):
 @app.route("/request/<int:request_id>/reject", methods=["POST"])
 def reject_request_route(request_id):
     """Reject a pending request (staff only)."""
-    if not request.args.get("staff") == "1":
-        return ("", 403)
+    staff_check = require_staff()
+    if staff_check:
+        return staff_check
     
     if not db.is_db_configured():
         flash("Database not configured.", "error")
@@ -242,8 +292,9 @@ def reject_request_route(request_id):
 @app.route("/request/<int:request_id>/close", methods=["POST"])
 def close_request_route(request_id):
     """Close an active or verified request (staff only)."""
-    if not request.args.get("staff") == "1":
-        return ("", 403)
+    staff_check = require_staff()
+    if staff_check:
+        return staff_check
     
     if not db.is_db_configured():
         flash("Database not configured.", "error")
@@ -269,8 +320,9 @@ def close_request_route(request_id):
 @app.route("/request/<int:request_id>/activate", methods=["POST"])
 def activate_request(request_id):
     """Activate a request and send Wave 1 alerts."""
-    if not request.args.get("staff") == "1":
-        return ("", 403)
+    staff_check = require_staff()
+    if staff_check:
+        return staff_check
     
     if not db.is_db_configured():
         flash("Database not configured.", "error")
@@ -394,8 +446,9 @@ def _send_whatsapp_alert(donor, req):
 @app.route("/request/<int:request_id>/advance", methods=["POST"])
 def advance_simulation(request_id):
     """Advance the simulator: process pending replies and fire Wave 2 if needed."""
-    if not request.args.get("staff") == "1":
-        return ("", 403)
+    staff_check = require_staff()
+    if staff_check:
+        return staff_check
     
     if not db.is_db_configured():
         flash("Database not configured.", "error")
@@ -521,8 +574,9 @@ def advance_simulation(request_id):
 @app.route("/request/<int:request_id>/donor/<int:donor_id>/mark-donated", methods=["POST"])
 def mark_donated(request_id, donor_id):
     """Mark a confirmed donor as having donated."""
-    if not request.args.get("staff") == "1":
-        return ("", 403)
+    staff_check = require_staff()
+    if staff_check:
+        return staff_check
     
     if not db.is_db_configured():
         flash("Database not configured.", "error")
@@ -664,8 +718,9 @@ def match_preview(request_id):
 @app.route("/staff")
 def staff_dashboard():
     """Staff dashboard showing request queue grouped by status."""
-    if not request.args.get("staff") == "1":
-        return ("", 403)
+    staff_check = require_staff()
+    if staff_check:
+        return staff_check
     
     if not db.is_db_configured():
         flash("Database not configured.", "error")
@@ -696,8 +751,9 @@ def staff_dashboard():
 @app.route("/staff/donors")
 def staff_donor_directory():
     """Staff donor directory with eligibility badges."""
-    if not request.args.get("staff") == "1":
-        return ("", 403)
+    staff_check = require_staff()
+    if staff_check:
+        return staff_check
     
     if not db.is_db_configured():
         flash("Database not configured.", "error")
@@ -739,8 +795,9 @@ def staff_donor_directory():
 @app.route("/staff/experiment", methods=["GET", "POST"])
 def experiment_mode():
     """Experiment mode: compare alerting strategies on synthetic donors."""
-    if not request.args.get("staff") == "1":
-        return ("", 403)
+    staff_check = require_staff()
+    if staff_check:
+        return staff_check
     
     if not db.is_db_configured():
         flash("Database not configured.", "error")

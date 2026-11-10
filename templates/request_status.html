@@ -15,7 +15,7 @@
         </div>
         <div>
             <strong style="color: #666;">Units:</strong>
-            <span style="color: #333;">{{ request.units }}</span>
+            <span style="color: #333;">{{ request.units|unit_int }}</span>
         </div>
         <div>
             <strong style="color: #666;">Hospital:</strong>
@@ -27,7 +27,7 @@
         </div>
         <div>
             <strong style="color: #666;">Needed By:</strong>
-            <span style="color: #333;">{{ request.needed_by }}</span>
+            <span style="color: #333;">{{ request.needed_by|human_date }}</span>
         </div>
         <div>
             <strong style="color: #666;">Contact:</strong>
@@ -64,6 +64,43 @@
 {% if request.status == 'pending_verification' %}
     <div class="alert warning">
         ⏳ This request is pending verification by hospital staff. Donors will be alerted once verified.
+    </div>
+
+    <div style="background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="color: #333; margin-bottom: 15px;">🔍 Verification</h3>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+            <form method="POST" action="/request/{{ request.id }}/verify?staff=1" style="margin: 0;">
+                <input type="hidden" name="staff_name" value="Staff Member">
+                <button type="submit" style="
+                    width: 100%;
+                    padding: 10px;
+                    background-color: #28a745;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    font-size: 14px;
+                ">✅ Verify Request</button>
+            </form>
+
+            <form method="POST" action="/request/{{ request.id }}/reject?staff=1" style="margin: 0;">
+                <input type="hidden" name="staff_name" value="Staff Member">
+                <input type="hidden" name="reason" value="Rejected by staff verification">
+                <button type="submit" style="
+                    width: 100%;
+                    padding: 10px;
+                    background-color: #dc3545;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    font-size: 14px;
+                ">❌ Reject Request</button>
+            </form>
+        </div>
     </div>
 {% elif request.status == 'active' %}
     <div class="alert" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb;">
