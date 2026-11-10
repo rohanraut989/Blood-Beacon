@@ -5,6 +5,16 @@ Run with: pytest tests/test_stage2.py -v
 """
 
 import pytest
+from datetime import date, datetime
+from utils import parse_date
+
+
+def test_parse_date_accepts_supabase_and_python_date_values():
+    assert parse_date("2026-11-10") == date(2026, 11, 10)
+    assert parse_date("2026-11-10T17:06:18.609602+00:00") == date(2026, 11, 10)
+    assert parse_date("2026-11-10T17:06:18.609602Z") == date(2026, 11, 10)
+    assert parse_date(date(2026, 11, 10)) == date(2026, 11, 10)
+    assert parse_date(datetime(2026, 11, 10, 17, 6)) == date(2026, 11, 10)
 import sys
 import os
 from datetime import datetime, date, timedelta

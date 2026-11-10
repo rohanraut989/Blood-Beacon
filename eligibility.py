@@ -4,7 +4,8 @@ Assesses donor eligibility based on NBTC rules.
 Pure, unit-testable function: assess_donor(donor, donations, rules, today)
 """
 
-from datetime import datetime, date
+from datetime import date
+from utils import parse_date
 
 def assess_donor(donor, donations, rules, today):
     """
@@ -30,12 +31,8 @@ def assess_donor(donor, donations, rules, today):
     eligible_on = None
     
     # Parse dates
-    if isinstance(today, str):
-        today = datetime.strptime(today, "%Y-%m-%d").date()
-    if isinstance(donor.get("date_of_birth"), str):
-        dob = datetime.strptime(donor["date_of_birth"], "%Y-%m-%d").date()
-    else:
-        dob = donor["date_of_birth"]
+    today = parse_date(today)
+    dob = parse_date(donor["date_of_birth"])
     
     # === 1. AGE CHECK ===
     age_min = int(rules.get("age_min", 18))
@@ -77,13 +74,7 @@ def assess_donor(donor, donations, rules, today):
         latest_donation = sorted_donations[0]
         
         # Parse donation date
-        if isinstance(latest_donation["donated_on"], str):
-            last_donation_date = datetime.strptime(
-                latest_donation["donated_on"],
-                "%Y-%m-%d"
-            ).date()
-        else:
-            last_donation_date = latest_donation["donated_on"]
+        last_donation_date = parse_date(latest_donation["donated_on"])
         
         # Determine gap requirement based on gender
         if donor.get("gender") == "Female":

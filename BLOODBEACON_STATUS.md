@@ -1243,3 +1243,12 @@ Flask-to-bridge API, and checks authenticated `GET /internal/ping` at startup.
 Inbound Baileys `@lid` identities resolve through `remoteJidAlt`,
 `participantAlt`, or `senderPn` before digits-only forwarding; unresolved
 identities are forwarded as the raw JID and logged for diagnosis.
+
+## Supabase Timestamp Parsing
+
+Supabase `timestamptz` values are accepted by the shared `utils.parse_date`
+helper, including date-only strings, fractional seconds, `Z` timestamps,
+offset timestamps, and Python date/datetime objects. The activation path now
+uses it for donor birth dates and donations in `eligibility.py`, donation and
+alert history in `predictor.py`, and alert history in `alerting.py`; the
+request display formatter also remains tolerant of full ISO timestamps.

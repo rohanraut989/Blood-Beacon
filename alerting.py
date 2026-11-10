@@ -6,6 +6,7 @@ based on the Stage 3 ranking, anti-spam rules, and quiet hours.
 """
 
 from datetime import datetime, time
+from utils import parse_date
 
 
 def plan_waves(ranked_eligible, request, alerts_history, now):
@@ -48,10 +49,7 @@ def plan_waves(ranked_eligible, request, alerts_history, now):
         count_30d = 0
         for alert in alerts:
             alert_created = alert.get("created_at")
-            if isinstance(alert_created, str):
-                alert_date = datetime.strptime(alert_created, "%Y-%m-%d").date()
-            else:
-                alert_date = alert_created
+            alert_date = parse_date(alert_created)
             
             days_ago = (now.date() - alert_date).days
             if days_ago <= 30:

@@ -19,6 +19,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
+from utils import parse_date
 
 MODEL_PATH = "models/predictor.joblib"
 TRAINING_DATA_PATH = "data/training_outcomes.csv"
@@ -185,12 +186,7 @@ def rank_donors(request, eligible_donors, donations_by_donor, alerts_by_donor, t
             )
             last_donation = sorted_dons[0]
             
-            if isinstance(last_donation.get("donated_on"), str):
-                last_donation_date = datetime.strptime(
-                    last_donation["donated_on"], "%Y-%m-%d"
-                ).date()
-            else:
-                last_donation_date = last_donation.get("donated_on", today)
+            last_donation_date = parse_date(last_donation.get("donated_on", today))
             
             days_since = (today - last_donation_date).days
         else:
@@ -204,10 +200,7 @@ def rank_donors(request, eligible_donors, donations_by_donor, alerts_by_donor, t
         if alerts:
             for alert in alerts:
                 alert_date_str = alert.get("created_at", "")
-                if isinstance(alert_date_str, str):
-                    alert_date = datetime.strptime(alert_date_str, "%Y-%m-%d").date()
-                else:
-                    alert_date = alert_date_str
+                alert_date = parse_date(alert_date_str)
                 
                 days_ago = (today - alert_date).days
                 if days_ago <= 30:

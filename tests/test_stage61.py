@@ -17,6 +17,7 @@ sys.modules['db'] = mock_db
 
 import app as app_module
 from app import app
+from utils import parse_date
 
 @pytest.fixture
 def client():
@@ -92,6 +93,42 @@ class TestWhatsAppActivation:
             assert 'O+' in call.kwargs['json']['message']  # Blood group in message
             assert 'Patient needs O+ blood at Test Hospital, Kathmandu.' in call.kwargs['json']['message']
             assert 'Did you donate blood in the last 3 months?' in call.kwargs['json']['message']
+
+    @patch('app.requests.post')
+    def test_activation_accepts_supabase_timestamp_values(self, mock_post, client):
+        """Activation tolerates timestamptz values returned by Supabase."""
+        donor = mock_db.insert_donor(
+            name="Timestamp Donor", blood_group="O+", city="Kathmandu",
+            area="Thamel", phone="9779817612738", gender="M",
+            date_of_birth="1990-01-01T00:00:00.000000+00:00", weight_kg=70
+        )
+        mock_db.insert_donation(
+            donor_id=donor["id"],
+            donated_on="2025-01-01T17:06:18.609602+00:00",
+            units=1,
+        )
+        req = mock_db.insert_request(
+            patient_name="Timestamp Patient", blood_group="O+", component="whole_blood",
+            units=1, hospital_name="Test Hospital", city="Kathmandu",
+            needed_by="2026-11-20T00:00:00.000000+00:00",
+            contact_phone="9779817612000", created_by="staff_test"
+        )
+        mock_db.verify_request(req["id"], "staff_test")
+        prior_alert = mock_db.insert_alert(
+            request_id=req["id"], donor_id=donor["id"], wave_no=1, channel="simulator"
+        )
+        mock_db._test_alerts[prior_alert["id"]]["created_at"] = (
+            "2025-10-01T17:06:18.609602+00:00"
+        )
+        mock_post.return_value = MagicMock(status_code=200)
+
+        response = client.post(
+            f"/request/{req['id']}/activate?staff=1&channel=whatsapp",
+            follow_redirects=True
+        )
+
+        assert response.status_code == 200
+        assert mock_db.get_request(req["id"])["status"] == "active"
     
     @patch('app.requests.post')
     def test_activation_creates_whatsapp_alerts(self, mock_post, client):

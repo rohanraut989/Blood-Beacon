@@ -14,6 +14,7 @@ import compatibility
 import predictor
 import alerting
 from phone import normalize_phone
+from utils import parse_date
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
@@ -29,17 +30,15 @@ def format_human_date(value):
         return ""
     try:
         if isinstance(value, str):
-            # Handle ISO date format (2026-11-10)
-            if len(value) == 10:
-                dt = datetime.strptime(value, "%Y-%m-%d")
-            # Handle ISO datetime format (2026-11-10T10:55:00)
-            elif "T" in value:
+            if "T" in value:
                 dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
             else:
-                return value
+                dt = parse_date(value)
         else:
             dt = value
-        return dt.strftime("%d %b %Y, %I:%M %p").lstrip("0").replace(" 0", " ")
+        if isinstance(dt, datetime):
+            return dt.strftime("%d %b %Y, %I:%M %p").lstrip("0").replace(" 0", " ")
+        return dt.strftime("%d %b %Y").lstrip("0")
     except (ValueError, AttributeError):
         return value
 
