@@ -488,50 +488,7 @@ def activate_request(request_id, _internal=False):
             flash(f"Request cannot be activated (status: {req['status']}).", "error")
             return redirect(url_for("request_status", request_id=request_id, staff=1))
     
-    # Build the matching ladder before ranking: predictor scores only order
-    # donors within a tier, never across exact/compatible/distant tiers.
-    all_donors = db.get_all_donors()
-    
-    rules_list = db.get_all_rules()
-    rules_dict = {r["key"]: r["value"] for r in rules_list}
-    
-    today = date.today()
-    eligible_by_tier = {1: [], 2: [], 3: []}
-    
-    donations_by_donor = {}
-    alerts_by_donor = {}
-    
-    for donor in all_donors:
-        # Check blood type compatibility
-        if not compatibility.is_compatible(donor["blood_group"], req["blood_group"], req.get("component", "whole_blood")):
-            continue
-        
-        donations = db.get_donations_for_donor(donor["id"])
-        donations_by_donor[donor["id"]] = donations
-        alerts = db.get_alerts_for_donor(donor["id"])
-        alerts_by_donor[donor["id"]] = alerts
-        
-        # Assess eligibility
-        assessment = eligibility.assess_donor(donor, donations, rules_dict, today)
-        
-        donor_info = dict(donor)
-        donor_info["eligibility_status"] = assessment["status"]
-        
-        if assessment["status"] == "eligible":
-            donor_group = donor.get("blood_group")
-            same_city = donor.get("city") == req.get("city")
-            exact = donor_group == req.get("blood_group")
-            tier = 1 if same_city and exact else 2 if same_city else 3
-            donor_info["match_tier"] = tier
-            donor_info["cross_group"] = not exact
-            eligible_by_tier[tier].append(donor_info)
-
-    ranked_with_scores = []
-    for tier in (1, 2, 3):
-        ranked_with_scores.extend(predictor.rank_donors(
-            req, eligible_by_tier[tier], donations_by_donor,
-            alerts_by_donor, today
-        ))
+    ranked_with_scores, alerts_by_donor, eligible_pool_count = _ranked_match_pool(req)
     
     # Convert to just donor dicts for planner
     ranked_donors = [donor for donor, score, reason in ranked_with_scores]
@@ -543,7 +500,7 @@ def activate_request(request_id, _internal=False):
     # Activate request
     db.update_request_match_pool_count(
         request_id,
-        sum(len(donors) for donors in eligible_by_tier.values())
+        eligible_pool_count
     )
     db.update_request_status(request_id, "active")
     
@@ -595,6 +552,93 @@ def activate_request(request_id, _internal=False):
     
     flash(f"Request activated! {len(wave1_donors)} donors alerted in Wave 1.", "success")
     return redirect(url_for("request_status", request_id=request_id, staff=1))
+
+
+def _ranked_match_pool(req):
+    """Build the tiered, currently eligible pool in deterministic tier order."""
+    rules_list = db.get_all_rules()
+    rules_dict = {rule["key"]: rule["value"] for rule in rules_list}
+    today = date.today()
+    eligible_by_tier = {1: [], 2: [], 3: []}
+    donations_by_donor = {}
+    alerts_by_donor = {}
+
+    for donor in db.get_all_donors():
+        if not compatibility.is_compatible(
+            donor["blood_group"], req["blood_group"], req.get("component", "whole_blood")
+        ):
+            continue
+        donations = db.get_donations_for_donor(donor["id"])
+        donations_by_donor[donor["id"]] = donations
+        alerts = db.get_alerts_for_donor(donor["id"])
+        alerts_by_donor[donor["id"]] = alerts
+        assessment = eligibility.assess_donor(donor, donations, rules_dict, today)
+        if assessment["status"] != "eligible":
+            continue
+        donor_info = dict(donor)
+        donor_info["eligibility_status"] = assessment["status"]
+        exact = donor.get("blood_group") == req.get("blood_group")
+        same_city = donor.get("city") == req.get("city")
+        donor_info["match_tier"] = 1 if same_city and exact else 2 if same_city else 3
+        donor_info["cross_group"] = not exact
+        eligible_by_tier[donor_info["match_tier"]].append(donor_info)
+
+    ranked = []
+    for tier in (1, 2, 3):
+        ranked.extend(predictor.rank_donors(
+            req, eligible_by_tier[tier], donations_by_donor,
+            alerts_by_donor, today
+        ))
+    return ranked, alerts_by_donor, sum(len(donors) for donors in eligible_by_tier.values())
+
+
+def _confirmed_count(request_id):
+    return sum(
+        1 for alert in db.get_alerts_for_request(request_id)
+        if alert.get("reply") == "confirmed"
+    )
+
+
+def _backfill_after_definitive_reply(request_obj, resolved_alert):
+    """Spend one definitive decline by alerting the next eligible donor."""
+    if request_obj.get("status") != "active":
+        return None
+    if _confirmed_count(request_obj["id"]) >= int(float(request_obj.get("units", 0) or 0)):
+        return None
+
+    ranked, alerts_by_donor, _ = _ranked_match_pool(request_obj)
+    alerts = db.get_alerts_for_request(request_obj["id"])
+    alerted_ids = {alert["donor_id"] for alert in alerts}
+    wave_no = resolved_alert.get("wave_no", 1)
+    channel = resolved_alert.get("channel", "whatsapp")
+
+    for donor, score, reason in ranked:
+        if donor["id"] in alerted_ids:
+            continue
+        plan = alerting.plan_waves(
+            [(donor, score, reason)], request_obj, alerts_by_donor, datetime.now()
+        )
+        if not plan["wave1"]:
+            continue
+        db.insert_alert(
+            request_id=request_obj["id"],
+            donor_id=donor["id"],
+            wave_no=wave_no,
+            channel=channel,
+            match_tier=donor.get("match_tier", 1),
+            cross_group=donor.get("cross_group", False),
+        )
+        if channel == "whatsapp":
+            _send_whatsapp_alert(donor, request_obj)
+        db.insert_audit_log(
+            actor="system",
+            action="backfill_alert",
+            entity="request",
+            entity_id=request_obj["id"],
+            detail=f"Wave {wave_no}: backfilled donor {donor.get('name', donor['id'])}",
+        )
+        return donor
+    return None
 
 
 def _patient_first_name(req):
@@ -1308,6 +1352,7 @@ def whatsapp_reply():
                     units=1,
                     source="self_report"
                 )
+                _backfill_after_definitive_reply(request_obj, matching_alert)
                 _send_whatsapp_message(
                     phone,
                     "Thank you for letting us know. Please take care of yourself — "
@@ -1361,6 +1406,8 @@ def whatsapp_reply():
                         entity_id=matching_alert["id"],
                         detail=receiver_details
                     )
+            elif processed_reply == "declined":
+                _backfill_after_definitive_reply(request_obj, matching_alert)
         # Re-evaluate request: check if fulfilled
         confirmed_count = 0
         alerts_for_request = db.get_alerts_for_request(matching_alert["request_id"])

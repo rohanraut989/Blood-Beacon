@@ -1305,3 +1305,8 @@ the receiver sees an explicit zero-match message rather than a false alert
 claim. A later donor registration does not silently activate a zero-match
 request: staff can see it as an open active request and re-run activation from
 the operational console as the documented manual re-trigger step.
+
+Definitive donor declines now trigger one immediate same-wave backfill alert.
+The backfill re-runs live eligibility, monthly alert-cap, tier, and predictor
+ordering checks, and does not run for no-response expiry or closed/fulfilled
+requests.
