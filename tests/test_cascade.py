@@ -162,6 +162,25 @@ def test_fresh_exact_donor_survives_predictor_failure(client):
     assert alerts[0]["donor_id"] == donor["id"]
 
 
+def test_fresh_exact_donor_survives_corrupt_predictor_model(client):
+    donor = mock_db.insert_donor(
+        name="Fresh Corrupt Model", blood_group="A+", city="Kathmandu",
+        area="Center", phone="919876543297", gender="M",
+        date_of_birth="1990-01-01", weight_kg=70,
+    )
+    req = mock_db.insert_request(
+        patient_name="A Patient", blood_group="A+", component="whole_blood",
+        units=1, hospital_name="Hospital", city="Kathmandu",
+        needed_by="2027-01-01", contact_phone="919999999996", created_by="test",
+    )
+    mock_db.verify_request(req["id"], "system")
+    with patch("app.predictor.score_donor", side_effect=EOFError("truncated model")):
+        client.post(f"/request/{req['id']}/activate?staff=1&channel=simulator")
+    alerts = mock_db.get_alerts_for_request(req["id"])
+    assert len(alerts) == 1
+    assert alerts[0]["donor_id"] == donor["id"]
+
+
 def test_registration_refills_existing_zero_match_request(client):
     req = mock_db.insert_request(
         patient_name="A Patient", blood_group="A+", component="whole_blood",

@@ -692,7 +692,7 @@ def _ranked_match_pool(req):
             alerts = db.get_alerts_for_donor(donor_id) or []
             alerts_by_donor[donor_id] = alerts
             assessment = eligibility.assess_donor(donor, donations, rules_dict, today)
-        except (KeyError, ValueError, TypeError, AttributeError) as error:
+        except Exception as error:
             exclusions.append((donor_id, f"eligibility/history error: {error}"))
             continue
         if assessment["status"] != "eligible":
@@ -716,7 +716,7 @@ def _ranked_match_pool(req):
                 req, eligible_by_tier[tier], donations_by_donor,
                 alerts_by_donor, today
             ))
-        except (FileNotFoundError, OSError, ValueError, TypeError, KeyError) as error:
+        except Exception as error:
             # Keep pool construction fail-open if a legacy model or one
             # malformed history row breaks the batch rank operation.
             print(f"Predictor batch fallback for tier {tier}: {type(error).__name__}: {error}")
@@ -726,7 +726,12 @@ def _ranked_match_pool(req):
             f"Match pool request {req.get('id')}: "
             + ", ".join(f"donor {donor_id}: {reason}" for donor_id, reason in exclusions)
         )
-    return ranked, alerts_by_donor, sum(len(donors) for donors in eligible_by_tier.values())
+    pool_size = sum(len(donors) for donors in eligible_by_tier.values())
+    print(
+        f"Match pool request {req.get('id')}: eligible={pool_size}, "
+        f"ranked={len(ranked)}, exclusions={len(exclusions)}"
+    )
+    return ranked, alerts_by_donor, pool_size
 
 
 def _confirmed_count(request_id):

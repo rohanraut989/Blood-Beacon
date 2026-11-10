@@ -239,12 +239,15 @@ def rank_donors(request, eligible_donors, donations_by_donor, alerts_by_donor, t
         
         try:
             score = score_donor(features)
-        except (FileNotFoundError, OSError, ValueError, TypeError, KeyError) as error:
+        except Exception as error:
             # Predictor output is advisory; a model/data issue must not erase
             # an otherwise eligible donor from the matching pool.
             print(
                 f"Predictor fallback for donor {donor_id}: {type(error).__name__}: {error}"
             )
+            score = 0.5
+        if not np.isfinite(score):
+            print(f"Predictor fallback for donor {donor_id}: non-finite score {score!r}")
             score = 0.5
         
         # Determine reason: strongest positive or main drag
