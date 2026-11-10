@@ -1,6 +1,6 @@
 # BloodBeacon — Build Status
 
-## Current Stage: 5.1 (COMPLETE) ✅
+## Current Stage: 6.1.1 (COMPLETE) ✅
 
 ### Stage 1: Skeleton + Data Model
 
@@ -1164,4 +1164,3 @@ Prove the WhatsApp outbound path: Wave 1 alerts written with channel="whatsapp",
 ### Next Steps
 
 Ready for deployment. All staff UX improvements complete and tested.
-
