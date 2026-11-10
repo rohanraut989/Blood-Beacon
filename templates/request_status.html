@@ -44,7 +44,7 @@
             border-radius: 4px;
             font-size: 13px;
             font-weight: 600;
-            {% if request.status == 'pending_verification' %}
+            {% if is_staff and request.status == 'pending_verification' %}
                 background-color: #fff3cd;
                 color: #856404;
             {% elif request.status == 'active' %}
@@ -102,7 +102,23 @@
             </form>
         </div>
     </div>
-{% elif request.status == 'active' %}
+{% elif is_staff and request.status == 'verified' %}
+    <div class="alert" style="background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba;">
+        ✅ Request verified and ready to activate.
+    </div>
+    {% if bridge_status %}
+        <div style="margin-top: 15px; padding: 12px; background: #f8f9fa; border-radius: 4px; font-size: 13px;">
+            <strong>WhatsApp Bridge:</strong>
+            <span style="{% if bridge_status == 'connected' %}color: #28a745;{% else %}color: #dc3545;{% endif %}">
+                {{ bridge_status|replace('_', ' ')|title }}
+            </span>
+        </div>
+    {% endif %}
+    <form method="POST" action="/request/{{ request.id }}/activate?staff=1&channel=whatsapp" style="margin-top: 15px;">
+        <button type="submit" class="btn">Activate — start Wave 1</button>
+    </form>
+    <a href="/match/{{ request.id }}" class="btn" style="background: #0c5460; margin-top: 15px;">View Donor Matches</a>
+{% elif is_staff and request.status == 'active' %}
     <div class="alert" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb;">
         ✅ Request verified and active. Donors are being alerted in waves.
     </div>
@@ -115,6 +131,15 @@
         </div>
     {% endif %}
     <a href="/match/{{ request.id }}" class="btn" style="background: #0c5460; margin-top: 15px;">View Donor Matches</a>
+    <div style="margin-top: 15px;">
+        <strong>Wave status:</strong> {{ alerts|length }} alert{{ '' if alerts|length == 1 else 's' }} sent
+    </div>
+    <form method="POST" action="/request/{{ request.id }}/advance?staff=1" style="margin-top: 15px;">
+        <button type="submit" class="btn">Advance Wave</button>
+    </form>
+    <form method="POST" action="/request/{{ request.id }}/close?staff=1" style="margin-top: 10px;">
+        <button type="submit" class="btn" style="background: #6c757d;">Close Request</button>
+    </form>
 {% endif %}
 
 <div class="link-group" style="margin-top: 20px;">

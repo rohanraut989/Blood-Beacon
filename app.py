@@ -228,8 +228,8 @@ def request_status(request_id):
         flash("Request not found.", "error")
         return redirect(url_for("home"))
 
-    # Check if staff mode is enabled
-    is_staff = request.args.get("staff") == "1"
+    # Check if staff mode is enabled, also preserving a prior staff session.
+    staff_mode = is_staff()
     
     # Get alerts for this request (if any)
     alerts = db.get_alerts_for_request(request_id)
@@ -243,12 +243,12 @@ def request_status(request_id):
         alert_details.append(alert_with_donor)
     
     # Get bridge status for staff view
-    bridge_status = _get_bridge_status() if is_staff else None
+    bridge_status = _get_bridge_status() if staff_mode else None
 
     return render_template(
         "request_status.html",
         request=req,
-        is_staff=is_staff,
+        is_staff=staff_mode,
         alerts=alert_details,
         bridge_status=bridge_status
     )

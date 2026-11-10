@@ -146,8 +146,11 @@ def test_verify_flips_status_to_verified_and_creates_audit(client):
         follow_redirects=False
     )
     
-    # Should redirect to request_status
+    # Should redirect to the staff request detail page
     assert response.status_code in [302, 303]
+    assert response.headers["Location"].endswith(
+        f"/request/{req['id']}?staff=1"
+    )
     
     # Check that status changed
     updated_req = mock_db.get_request(req["id"])
@@ -158,6 +161,29 @@ def test_verify_flips_status_to_verified_and_creates_audit(client):
     verify_logs = [a for a in audit_logs if a.get("action") == "verify_request"]
     assert len(verify_logs) > 0
     assert verify_logs[0]["actor"] == "Dr. Smith"
+
+def test_verified_staff_detail_has_activate_form_and_public_view_does_not(client):
+    """Verified requests expose activation only in the staff request detail."""
+    mock_db.reset()
+    req = mock_db.insert_request(
+        patient_name="Activation Test", blood_group="O+", component="WB",
+        units=1, hospital_name="Hospital E", city="City5", contact_phone="555-0000",
+        needed_by="2026-12-31", created_by="test"
+    )
+    mock_db.update_request_status(req["id"], "verified")
+
+    staff_response = client.get(f"/request/{req['id']}?staff=1")
+    assert staff_response.status_code == 200
+    assert b"Activate" in staff_response.data
+    assert f"/request/{req['id']}/activate?staff=1&channel=whatsapp".encode() in staff_response.data
+    assert b"WhatsApp Bridge" in staff_response.data
+
+    with client.session_transaction() as session:
+        session.pop("staff", None)
+    public_response = client.get(f"/request/{req['id']}")
+    assert public_response.status_code == 200
+    assert b"Activate" not in public_response.data
+    assert b"WhatsApp Bridge" not in public_response.data
 
 def test_reject_flips_status_to_rejected_and_creates_audit(client):
     """POST /request/<id>/reject flips status to rejected and creates audit entry."""

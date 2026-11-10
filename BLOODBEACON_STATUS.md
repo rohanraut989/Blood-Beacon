@@ -1226,3 +1226,11 @@ message includes the donor's first name, blood group, and city. A successful
 send records `welcome_msg_sent`; an offline, timed-out, or failed bridge
 records `welcome_msg_failed`. Neither outcome blocks or changes the normal
 registration success path. Seed data and test fixtures do not send welcomes.
+
+## Staff Verification to Activation
+
+Staff verification and rejection now return to the staff request detail view.
+Verified requests show the WhatsApp bridge status, donor match preview, and
+the `Activate — start Wave 1` control; active requests retain wave status,
+Advance Wave, and Close Request controls. Public request views do not expose
+these staff controls.
