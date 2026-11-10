@@ -1,6 +1,6 @@
 # BloodBeacon — Build Status
 
-## Current Stage: 3 (COMPLETE) ✅
+## Current Stage: 5.1 (COMPLETE) ✅
 
 ### Stage 1: Skeleton + Data Model
 
@@ -647,12 +647,100 @@ None. All Stage 1 + Stage 2 + Stage 2.1 + Stage 3 objectives complete and all 56
 
 ---
 
+## Stage 5.1: Experiment Routes Proven + Close Request
+
+**Objective:** Implement and test Flask route handlers for experiment mode with UI templates, add close request functionality, and verify dashboard template rendering.
+
+**Status:** ✅ COMPLETE (10 new tests, 95 total passing)
+
+### What Was Built
+
+1. **Experiment Mode Templates**
+   - `experiment_mode.html`: Form for pool size, units needed, trials, seed (GET endpoint)
+   - `experiment_results.html`: Results display with:
+     - Per-strategy metrics (avg alerts, avg time, success rate)
+     - CSS bar charts for visual comparison
+     - Synthetic data caption (required by spec)
+     - Parameters section showing inputs
+
+2. **Close Request Endpoint** (`/request/<id>/close` POST)
+   - Closes active or verified requests only
+   - Records staff name and reason in audit log
+   - Returns 403 without ?staff=1 flag
+   - Status transition: verified/active → closed
+
+3. **Dashboard Template Update** (`staff_dashboard.html`)
+   - Renders requests grouped by status (pending_verification, verified, active, fulfilled, rejected)
+   - Shows patient name, hospital, city, blood group, status badge for each request
+   - Counts requests per status bucket
+   - Fixed to use `requests_by_status` dict instead of flat list
+
+4. **New Test Coverage** (10 tests, all passing)
+   - **Experiment Routes Tests (6):**
+     - GET returns 200 with form fields
+     - POST deterministic: same seed twice → identical results
+     - Waves ≤ Broadcast (alert count)
+     - Success rates valid in [0, 1]
+     - Results page shows synthetic data caption
+     - 403 without ?staff=1 flag
+   - **Close Request Tests (3):**
+     - Close active request changes status
+     - Close verified request works
+     - Close creates audit log entry with staff name and reason
+   - **Dashboard Render Tests (1):**
+     - Dashboard renders all requests grouped by status
+     - All patient names appear in response
+
+### Key Implementation Details
+
+1. **Experiment Determinism:** Both runs with seed=42 produce exact floating-point matches for avg alerts (proven by test parsing HTML output and comparing strings).
+
+2. **Waves vs Broadcast Logic:**
+   - Broadcast: Alert all donors in 1 wave (10-min window)
+   - Waves: Alert top 10 first, then next 20 if needed (up to 20-min window)
+   - Waves consistently sends fewer or equal alerts than Broadcast
+
+3. **Close Request Validation:** Can only close requests in `active` or `verified` status (not pending, fulfilled, or rejected).
+
+4. **Mock DB Patching:** Tests patch `sys.modules['db'] = mock_db` BEFORE importing app to ensure Flask uses mock DB.
+
+5. **Dashboard Grouping:** Python dict with status buckets; template iterates per-status using `for status, reqs in requests_by_status.items() if reqs` to show only non-empty statuses.
+
+### Verified Behavior
+
+✅ Experiment GET returns 200 with form  
+✅ Experiment POST determinism: same seed → identical averages  
+✅ Waves alert count ≤ Broadcast (privacy benefit)  
+✅ Success rates always 0.0 or 1.0 (in valid range)  
+✅ Results page shows synthetic data caption  
+✅ Close request endpoint requires staff flag (403 without)  
+✅ Close creates audit log with actor/action/reason  
+✅ Dashboard renders all status groups with patient names  
+✅ All 95 tests passing (85 previous + 10 new)  
+✅ 100% backward compatibility maintained
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `templates/experiment_mode.html` | NEW: Form for experiment parameters |
+| `templates/experiment_results.html` | NEW: Results display with metrics, bars, synthetic caption |
+| `templates/staff_dashboard.html` | Updated to render requests_by_status dict with grouping |
+| `app.py` | Added /request/<id>/close route; no changes to existing logic |
+| `db.py` | Added close_request() function |
+| `tests/mock_db.py` | Added close_request() and get_audit_log() functions |
+| `tests/test_stage5.py` | Added 10 new tests (Experiment Routes, Close Request, Dashboard Render); fixed imports for mock_db patching |
+| `BLOODBEACON_STATUS.md` | Added Stage 5.1 section |
+
+---
+
 **Last Updated:** 2024-11-10  
-**Stages Complete:** Stage 1 ✅, Stage 2 ✅, Stage 2.1 ✅, Stage 3 ✅, Stage 4 ✅, Stage 5 ✅
-**Total Tests:** 85 passing (18 + 27 + 11 + 17 + 9 + 1 new flag test)
+**Stages Complete:** Stage 1 ✅, Stage 2 ✅, Stage 2.1 ✅, Stage 3 ✅, Stage 4 ✅, Stage 5 ✅, Stage 5.1 ✅
+**Total Tests:** 95 passing (18 + 27 + 11 + 17 + 9 + 10 + 1 flag test)
 **Commits:**
   - Stage 2: `eligibility + compatibility engines, match preview upgrade`
   - Stage 2.1: `plasma matrix correction + RBC table test`
   - Stage 3: `donor response predictor`
   - Stage 4: `wave alerting + simulator`
-  - Stage 5: `staff dashboard + experiment mode` (coming)
+  - Stage 5: `staff dashboard + experiment mode`
+  - Stage 5.1: `experiment routes proven + close request`

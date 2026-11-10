@@ -155,6 +155,10 @@ def insert_audit_log(actor, action, entity, entity_id=None, detail=None):
     _test_audit_log[log_entry["id"]] = log_entry
     return log_entry
 
+def get_audit_log():
+    """Get all audit log entries."""
+    return list(_test_audit_log.values())
+
 # === ALERTS (Stage 3+) ===
 
 def get_alerts_for_donor(donor_id):
@@ -234,3 +238,17 @@ def reject_request(request_id, staff_name, reason=None):
 def get_requests_by_status(status):
     """Get all requests with a given status."""
     return [r for r in _test_requests.values() if r["status"] == status]
+
+def close_request(request_id, staff_name, reason=None):
+    """Close a request."""
+    result = update_request_status(request_id, "closed", staff_name)
+    if result:
+        # Also log it
+        insert_audit_log(
+            actor=staff_name,
+            action="close_request",
+            entity="request",
+            entity_id=request_id,
+            detail=f"Closed. Reason: {reason}" if reason else "Closed"
+        )
+    return result

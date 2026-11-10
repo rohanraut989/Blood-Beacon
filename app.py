@@ -221,6 +221,33 @@ def reject_request_route(request_id):
     flash(f"Request rejected. Reason: {reason}", "info")
     return redirect(url_for("request_status", request_id=request_id, staff=1))
 
+@app.route("/request/<int:request_id>/close", methods=["POST"])
+def close_request_route(request_id):
+    """Close an active or verified request (staff only)."""
+    if not request.args.get("staff") == "1":
+        return ("", 403)
+    
+    if not db.is_db_configured():
+        flash("Database not configured.", "error")
+        return redirect(url_for("home"))
+
+    req = db.get_request(request_id)
+    if not req:
+        flash("Request not found.", "error")
+        return redirect(url_for("home"))
+    
+    # Can close active or verified requests
+    if req["status"] not in ["active", "verified"]:
+        flash(f"Can only close active or verified requests (current: {req['status']}).", "error")
+        return redirect(url_for("request_status", request_id=request_id, staff=1))
+    
+    staff_name = request.form.get("staff_name", "Unknown Staff")
+    reason = request.form.get("reason", "No reason provided")
+    db.close_request(request_id, staff_name, reason)
+    
+    flash(f"Request closed. Reason: {reason}", "info")
+    return redirect(url_for("request_status", request_id=request_id, staff=1))
+
 @app.route("/request/<int:request_id>/activate", methods=["POST"])
 def activate_request(request_id):
     """Activate a request and send Wave 1 alerts (simulator channel)."""

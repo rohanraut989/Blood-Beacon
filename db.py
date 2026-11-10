@@ -261,3 +261,17 @@ def get_requests_by_status(status: str) -> list:
     db = get_db()
     result = db.table("requests").select("*").eq("status", status).order("created_at", desc=True).execute()
     return result.data if result.data else []
+
+def close_request(request_id: int, staff_name: str, reason: str = None) -> dict:
+    """Close a request. Set status to 'closed' and log the action."""
+    db = get_db()
+    result = update_request_status(request_id, "closed", staff_name)
+    if result:
+        insert_audit_log(
+            actor=staff_name,
+            action="close_request",
+            entity="request",
+            entity_id=request_id,
+            detail=f"Closed. Reason: {reason}" if reason else "Closed"
+        )
+    return result

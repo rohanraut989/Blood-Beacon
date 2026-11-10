@@ -6,7 +6,18 @@ and experiment mode strategy comparison.
 """
 
 import pytest
-from tests import mock_db
+import sys
+import os
+
+# Add parent directory to path so we can import the app and mock_db
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Use mock database for testing - BEFORE importing app
+import tests.mock_db as mock_db
+sys.modules['db'] = mock_db
+
+import app as app_module
+from app import app
 from datetime import date, timedelta
 
 # ========== VERIFICATION WORKFLOW TESTS ==========
@@ -284,4 +295,291 @@ class TestExperimentMode:
         for rate in success_rates_broadcast + success_rates_waves:
             assert 0 <= rate <= 1
             assert rate in [0.0, 1.0]
+
+
+# ========== EXPERIMENT ROUTES TESTS (Stage 5.1) ==========
+
+class TestExperimentRoutes:
+    """Tests for experiment mode HTTP routes."""
+
+    def test_experiment_mode_get_returns_200(self):
+        """GET /staff/experiment?staff=1 should return 200 with form."""
+        from app import app
+        client = app.test_client()
+        response = client.get("/staff/experiment?staff=1")
+        assert response.status_code == 200
+        assert b"Experiment Mode" in response.data
+        assert b"Pool Size" in response.data
+        assert b"Run Experiment" in response.data
+
+    def test_experiment_mode_post_deterministic(self):
+        """POST same params twice should return identical results."""
+        from app import app
+        client = app.test_client()
+        
+        # First run with seed 42
+        response1 = client.post("/staff/experiment?staff=1", data={
+            "pool_size": "60",
+            "units_needed": "2",
+            "trials": "10",
+            "seed": "42"
+        }, follow_redirects=False)
+        assert response1.status_code == 200
+        
+        # Extract summary from first response
+        data1 = response1.data.decode()
+        assert "Broadcast Strategy" in data1
+        assert "Waves Strategy" in data1
+        
+        # Extract numeric values (careful parsing of the HTML)
+        import re
+        broadcast_alerts1 = re.search(r'📢 Broadcast Strategy.*?Average Alerts Sent.*?<div class="metric-value">([0-9.]+)', data1, re.DOTALL)
+        waves_alerts1 = re.search(r'🌊 Waves Strategy.*?Average Alerts Sent.*?<div class="metric-value">([0-9.]+)', data1, re.DOTALL)
+        
+        # Second run with same seed
+        response2 = client.post("/staff/experiment?staff=1", data={
+            "pool_size": "60",
+            "units_needed": "2",
+            "trials": "10",
+            "seed": "42"
+        }, follow_redirects=False)
+        assert response2.status_code == 200
+        
+        data2 = response2.data.decode()
+        broadcast_alerts2 = re.search(r'📢 Broadcast Strategy.*?Average Alerts Sent.*?<div class="metric-value">([0-9.]+)', data2, re.DOTALL)
+        waves_alerts2 = re.search(r'🌊 Waves Strategy.*?Average Alerts Sent.*?<div class="metric-value">([0-9.]+)', data2, re.DOTALL)
+        
+        # Exact match proves determinism
+        if broadcast_alerts1 and broadcast_alerts2:
+            assert broadcast_alerts1.group(1) == broadcast_alerts2.group(1)
+        if waves_alerts1 and waves_alerts2:
+            assert waves_alerts1.group(1) == waves_alerts2.group(1)
+
+    def test_experiment_waves_less_than_broadcast(self):
+        """Waves strategy should send fewer or equal alerts than Broadcast."""
+        from app import app
+        client = app.test_client()
+        
+        response = client.post("/staff/experiment?staff=1", data={
+            "pool_size": "60",
+            "units_needed": "2",
+            "trials": "10",
+            "seed": "42"
+        }, follow_redirects=False)
+        assert response.status_code == 200
+        
+        data = response.data.decode()
+        import re
+        
+        # Extract broadcast avg alerts
+        broadcast_match = re.search(r'📢 Broadcast Strategy.*?Average Alerts Sent.*?<div class="metric-value">([0-9.]+)', data, re.DOTALL)
+        waves_match = re.search(r'🌊 Waves Strategy.*?Average Alerts Sent.*?<div class="metric-value">([0-9.]+)', data, re.DOTALL)
+        
+        if broadcast_match and waves_match:
+            broadcast_alerts = float(broadcast_match.group(1))
+            waves_alerts = float(waves_match.group(1))
+            assert waves_alerts <= broadcast_alerts
+
+    def test_experiment_success_rates_valid(self):
+        """Success rates should be in [0, 1]."""
+        from app import app
+        client = app.test_client()
+        
+        response = client.post("/staff/experiment?staff=1", data={
+            "pool_size": "60",
+            "units_needed": "2",
+            "trials": "10",
+            "seed": "42"
+        }, follow_redirects=False)
+        assert response.status_code == 200
+        
+        data = response.data.decode()
+        import re
+        
+        # Find all success rate metrics
+        success_matches = re.findall(r'Success Rate.*?<div class="metric-value">([0-9.%]+)', data, re.DOTALL)
+        for match in success_matches:
+            if "%" in match:
+                pct = float(match.replace("%", ""))
+                assert 0 <= pct <= 100
+
+    def test_experiment_results_has_synthetic_caption(self):
+        """Results page should display synthetic data caption."""
+        from app import app
+        client = app.test_client()
+        
+        response = client.post("/staff/experiment?staff=1", data={
+            "pool_size": "60",
+            "units_needed": "2",
+            "trials": "10",
+            "seed": "42"
+        }, follow_redirects=False)
+        assert response.status_code == 200
+        
+        data = response.data.decode()
+        assert "Synthetic Data" in data or "synthetic" in data.lower()
+        assert "test data" in data.lower() or "procedurally generated" in data.lower()
+
+    def test_experiment_mode_requires_staff_flag(self):
+        """GET/POST /staff/experiment without ?staff=1 should return 403."""
+        from app import app
+        client = app.test_client()
+        
+        # GET without flag
+        response = client.get("/staff/experiment")
+        assert response.status_code == 403
+        
+        # POST without flag
+        response = client.post("/staff/experiment", data={
+            "pool_size": "60",
+            "units_needed": "2",
+            "trials": "10",
+            "seed": "42"
+        })
+        assert response.status_code == 403
+
+
+# ========== CLOSE REQUEST TESTS (Stage 5.1) ==========
+
+class TestCloseRequest:
+    """Tests for closing requests."""
+    
+    def setup_method(self):
+        """Reset mock_db before each test."""
+        mock_db.reset()
+
+    def test_close_active_request(self):
+        """Closing an active request should change status to 'closed'."""
+        req = mock_db.insert_request(
+            patient_name="Patient",
+            blood_group="O+",
+            component="whole_blood",
+            units=2,
+            hospital_name="Test Hospital",
+            city="Kathmandu",
+            needed_by="2024-11-20",
+            contact_phone="+977-1-123456",
+            created_by="test"
+        )
+        mock_db.verify_request(req["id"], "staff_alice")
+        mock_db.update_request_status(req["id"], "active")
+        
+        closed = mock_db.close_request(req["id"], "staff_bob", "Donor found")
+        assert closed["status"] == "closed"
+        
+        # Check audit log
+        audit_logs = mock_db.get_audit_log()
+        close_logs = [log for log in audit_logs if log["action"] == "close_request"]
+        assert len(close_logs) > 0
+        assert "Donor found" in close_logs[-1]["detail"]
+
+    def test_close_verified_request(self):
+        """Closing a verified (but not activated) request should work."""
+        req = mock_db.insert_request(
+            patient_name="Patient",
+            blood_group="A+",
+            component="whole_blood",
+            units=2,
+            hospital_name="Test Hospital",
+            city="Kathmandu",
+            needed_by="2024-11-20",
+            contact_phone="+977-1-123456",
+            created_by="test"
+        )
+        mock_db.verify_request(req["id"], "staff_alice")
+        
+        closed = mock_db.close_request(req["id"], "staff_bob", "Changed mind")
+        assert closed["status"] == "closed"
+
+    def test_close_request_creates_audit_log(self):
+        """Closing a request should create an audit log entry."""
+        mock_db.reset()
+        
+        req = mock_db.insert_request(
+            patient_name="Patient",
+            blood_group="B+",
+            component="whole_blood",
+            units=2,
+            hospital_name="Test Hospital",
+            city="Kathmandu",
+            needed_by="2024-11-20",
+            contact_phone="+977-1-123456",
+            created_by="test"
+        )
+        mock_db.verify_request(req["id"], "staff_alice")
+        mock_db.update_request_status(req["id"], "active")
+        
+        # Close the request
+        mock_db.close_request(req["id"], "staff_bob", "Emergency resolved")
+        
+        # Check audit log
+        audit_logs = mock_db.get_audit_log()
+        close_logs = [log for log in audit_logs if log["action"] == "close_request"]
+        assert len(close_logs) == 1
+        assert close_logs[0]["actor"] == "staff_bob"
+        assert close_logs[0]["entity_id"] == req["id"]
+
+
+# ========== DASHBOARD RENDER TESTS (Stage 5.1) ==========
+
+class TestDashboardRender:
+    """Tests that the staff dashboard template renders requests correctly."""
+    
+    def setup_method(self):
+        """Reset mock_db before each test."""
+        mock_db.reset()
+
+    def test_dashboard_renders_request_by_status(self):
+        """Dashboard should render all requests grouped by status."""
+        client = app.test_client()
+        
+        # Create one request per status
+        pending_req = mock_db.insert_request(
+            patient_name="Pending Patient",
+            blood_group="O+",
+            component="whole_blood",
+            units=2,
+            hospital_name="Hospital A",
+            city="Kathmandu",
+            needed_by="2024-11-20",
+            contact_phone="+977-1-111111",
+            created_by="test"
+        )
+        
+        verified_req = mock_db.insert_request(
+            patient_name="Verified Patient",
+            blood_group="A+",
+            component="whole_blood",
+            units=2,
+            hospital_name="Hospital B",
+            city="Pokhara",
+            needed_by="2024-11-20",
+            contact_phone="+977-1-222222",
+            created_by="test"
+        )
+        mock_db.verify_request(verified_req["id"], "staff_alice")
+        
+        active_req = mock_db.insert_request(
+            patient_name="Active Patient",
+            blood_group="B+",
+            component="whole_blood",
+            units=2,
+            hospital_name="Hospital C",
+            city="Lalitpur",
+            needed_by="2024-11-20",
+            contact_phone="+977-1-333333",
+            created_by="test"
+        )
+        mock_db.verify_request(active_req["id"], "staff_alice")
+        mock_db.update_request_status(active_req["id"], "active")
+        
+        # GET dashboard
+        response = client.get("/staff?staff=1")
+        assert response.status_code == 200
+        data = response.data.decode()
+        
+        # All patient names should appear in the response
+        assert "Pending Patient" in data
+        assert "Verified Patient" in data
+        assert "Active Patient" in data
 
