@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { createStateStore } from '../state.js';
 import { createBridgeLifecycle } from '../lifecycle.js';
+import { digitsOnlyPhone } from '../messages.js';
+
+test('Phone normalization: bridge JID input is digits-only', () => {
+  assert.strictEqual(digitsOnlyPhone('+91 98765-43210'), '919876543210');
+  assert.strictEqual(digitsOnlyPhone('977-9817612738'), '9779817612738');
+});
 
 // Test: Message ID deduplication
 test('Message dedupe: same ID processed once', async (t) => {

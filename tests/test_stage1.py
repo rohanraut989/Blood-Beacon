@@ -119,6 +119,39 @@ class TestDonorRegistration:
         
         assert response.status_code == 200
         assert b"registered as a donor" in response.data or b"Welcome" in response.data
+        assert mock_db.get_all_donors()[-1]["phone"] == "919999999999"
+
+    def test_donor_registration_nepal_stores_digits_only(self, client):
+        response = client.post("/register", data={
+            "name": "Nepal Donor",
+            "blood_group": "O+",
+            "city": "Kathmandu",
+            "area": "Thamel",
+            "country": "977",
+            "phone": "9817612738",
+            "gender": "Male",
+            "date_of_birth": "1990-01-01",
+            "weight_kg": "70"
+        }, follow_redirects=True)
+
+        assert response.status_code == 200
+        assert mock_db.get_all_donors()[-1]["phone"] == "9779817612738"
+
+    def test_donor_registration_rejects_short_mobile(self, client):
+        response = client.post("/register", data={
+            "name": "Short Number",
+            "blood_group": "B+",
+            "city": "Tiruchirappalli",
+            "area": "Cantonment",
+            "country": "91",
+            "phone": "987654321",
+            "gender": "Male",
+            "date_of_birth": "1990-01-01",
+            "weight_kg": "70"
+        }, follow_redirects=True)
+
+        assert b"exactly 10" in response.data
+        assert mock_db.get_all_donors() == []
     
     def test_donor_registration_missing_fields(self, client):
         """Test registration with missing required fields."""

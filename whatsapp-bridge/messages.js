@@ -1,6 +1,10 @@
 // BloodBeacon message handler and bridge API
 // Processes incoming WhatsApp replies and routes to Flask
 
+export function digitsOnlyPhone(phone) {
+  return String(phone || '').replace(/\D/g, '');
+}
+
 export function createMessageHandler({
   socket, flask, logger, seen, stateStore, fetchImpl = fetch,
 }) {
@@ -37,7 +41,7 @@ export function createMessageHandler({
     if (message.key.remoteJid?.includes('@g.us')) return; // Ignore group messages
 
     const text = (message.message?.conversation || message.message?.extendedTextMessage?.text || '').trim();
-    const senderPhone = message.key.remoteJid?.replace('@s.whatsapp.net', '') || '';
+    const senderPhone = digitsOnlyPhone(message.key.remoteJid?.replace('@s.whatsapp.net', ''));
 
     if (!text || !senderPhone) return;
 
@@ -81,7 +85,8 @@ export async function createBridgeAPI({ socket, bridgeSecret = '', port = 3100 }
       req.on('end', async () => {
         try {
           const { phone, message } = JSON.parse(body);
-          if (!phone || !message) {
+          const normalizedPhone = digitsOnlyPhone(phone);
+          if (!normalizedPhone || !message) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Missing phone or message' }));
             return;
@@ -89,9 +94,9 @@ export async function createBridgeAPI({ socket, bridgeSecret = '', port = 3100 }
 
           // Send message via Baileys
           if (socket) {
-            const jid = `${phone}@s.whatsapp.net`;
+            const jid = `${normalizedPhone}@s.whatsapp.net`;
             await socket.sendMessage(jid, { text: message });
-            console.log(`Sent to ${phone}: "${message}"`);
+            console.log(`Sent to ${normalizedPhone}: "${message}"`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true }));
           } else {

@@ -1198,3 +1198,20 @@ availability. `LIVE_TEST.md` documents the revised real-device script.
 **Verification:** 137 Flask tests pass, including the two-step happy path,
 recency deferral through the eligibility engine, Step 2 decline, unclear-text
 re-asks, and simulator parity.
+
+---
+
+## India/Nepal Phone Country Picker
+
+Donor registration now requires a country selection (India `+91`, selected by
+default, or Nepal `+977`) and a 10-digit national mobile number. The shared
+`normalize_phone(country, national)` helper strips punctuation, removes a
+pasted matching country code, validates the national length, and stores only
+digits in international format. The bridge applies the same digits-only
+defence before constructing WhatsApp JIDs and inbound matching compares
+digits-only values for legacy records.
+
+This closes a live-test failure where a stored `+977...` value produced an
+invalid WhatsApp JID and the alert disappeared. Focused Python coverage and
+bridge tests verify India, Nepal, pasted country-code input, short-number
+rejection, and JID normalization.

@@ -13,6 +13,7 @@ import eligibility
 import compatibility
 import predictor
 import alerting
+from phone import normalize_phone
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
@@ -86,14 +87,21 @@ def register_donor():
             blood_group = request.form.get("blood_group", "").strip()
             city = request.form.get("city", "").strip()
             area = request.form.get("area", "").strip()
-            phone = request.form.get("phone", "").strip()
+            country = request.form.get("country", "91").strip()
+            national_phone = request.form.get("phone", "").strip()
             gender = request.form.get("gender", "").strip()
             date_of_birth = request.form.get("date_of_birth", "").strip()
             weight_kg = float(request.form.get("weight_kg", 0))
 
             # Validate required fields
-            if not all([name, blood_group, city, phone, gender, date_of_birth, weight_kg]):
+            if not all([name, blood_group, city, national_phone, gender, date_of_birth, weight_kg]):
                 flash("All fields are required.", "error")
+                return redirect(url_for("register_donor"))
+
+            try:
+                phone = normalize_phone(country, national_phone)
+            except ValueError as error:
+                flash(str(error), "error")
                 return redirect(url_for("register_donor"))
 
             # Check if phone already exists
@@ -969,8 +977,18 @@ def whatsapp_reply():
         if not phone or not text or not message_id:
             return {"error": "Missing phone, text, or message_id"}, 400
         
-        # Find donor by phone
-        donor = db.get_donor_by_phone(phone)
+        # Match inbound bridge numbers by digits only for legacy/live records.
+        inbound_phone = "".join(character for character in phone if character.isdigit())
+        donor = next(
+            (
+                candidate for candidate in db.get_all_donors()
+                if "".join(
+                    character for character in str(candidate.get("phone", ""))
+                    if character.isdigit()
+                ) == inbound_phone
+            ),
+            None,
+        )
         if not donor:
             # Unknown number; ignore silently (idempotent)
             return {"status": "no_donor_for_phone"}, 200
