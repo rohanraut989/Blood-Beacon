@@ -72,6 +72,12 @@ small { color: var(--muted); }
 .btn, button.btn { display: inline-block; width: auto; padding: 12px 20px; border: 1px solid var(--red); border-radius: 8px; background: var(--red); color: white; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
 .btn:hover { background: var(--ink); border-color: var(--ink); }
 .btn-secondary, .btn-outline { background: var(--paper); color: var(--ink); border-color: var(--ink); }
+.btn-secondary:hover, .btn-secondary:focus, .btn-secondary:active,
+.btn-outline:hover, .btn-outline:focus, .btn-outline:active {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--bg);
+}
 .link-group { margin-top: 24px; text-align: center; font-size: 14px; }
 .link-group a { margin: 0 8px; text-decoration: underline; text-underline-offset: 3px; }
 .alert { padding: 14px 16px; margin-bottom: 14px; border: 1px solid var(--ink); border-radius: 6px; }
