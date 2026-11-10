@@ -1,27 +1,20 @@
 {% extends "base.html" %}
-
-{% block title %}BloodBeacon - Emergency Blood Donor Activation{% endblock %}
-
+{% block title %}BloodBeacon — Blood, found faster.{% endblock %}
 {% block content %}
-<div style="text-align: center;">
-    <h1>🩸 BloodBeacon</h1>
-    <p class="subtitle">Emergency Blood-Donor Activation System</p>
-    
-    <p style="color: #666; font-size: 15px; line-height: 1.6; margin-bottom: 30px;">
-        BloodBeacon finds eligible blood donors nearby when a hospital needs blood urgently.
-        We use AI to predict who's most likely to help, alert them on WhatsApp in smart waves,
-        and confirm donations in real time.
-    </p>
-
-    <div class="doors">
-        <a href="/register" class="door">
-            <h3>🎯 Register</h3>
-            <p>Become a donor</p>
-        </a>
-        <a href="/request" class="door">
-            <h3>🆘 Request</h3>
-            <p>Need blood?</p>
-        </a>
+<section class="hero">
+    <h1>Blood, found <span>faster.</span></h1>
+    <p class="hero-copy">When a hospital needs blood, BloodBeacon finds eligible donors nearby, ranks them with AI, and alerts them on WhatsApp in smart waves.</p>
+    <div class="hero-actions">
+        <a class="btn" href="/register">Become a donor</a>
+        <a class="btn btn-secondary" href="/request">Request blood</a>
     </div>
-</div>
+</section>
+<section class="how-it-works">
+    <h2>How it works</h2>
+    <div class="steps">
+        <article class="step"><div class="step-number">01</div><h3>Register</h3><p>Donors join the registry with their blood group and city.</p></article>
+        <article class="step"><div class="step-number">02</div><h3>AI matching</h3><p>Eligible donors are ranked by who is most likely to respond.</p></article>
+        <article class="step"><div class="step-number">03</div><h3>WhatsApp confirm</h3><p>Donors confirm in a simple two-step WhatsApp chat.</p></article>
+    </div>
+</section>
 {% endblock %}

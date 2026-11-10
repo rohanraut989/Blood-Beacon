@@ -3,61 +3,42 @@
 {% block title %}Request Status - BloodBeacon{% endblock %}
 
 {% block content %}
+<div class="card status-card">
 <h1>Request Status</h1>
 
-<div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-    <h3 style="color: #333; margin-bottom: 15px;">Patient: {{ request.patient_name }}</h3>
+<div class="status-summary">
+    <h3>Patient: {{ request.patient_name }}</h3>
     
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; font-size: 14px;">
+    <div class="grid-2">
         <div>
-            <strong style="color: #666;">Blood Group:</strong>
-            <span style="color: #333;">{{ request.blood_group }}</span>
+            <strong>Blood Group:</strong>
+            <span>{{ request.blood_group }}</span>
         </div>
         <div>
-            <strong style="color: #666;">Units:</strong>
-            <span style="color: #333;">{{ request.units|unit_int }}</span>
+            <strong>Units:</strong>
+            <span>{{ request.units|unit_int }}</span>
         </div>
         <div>
-            <strong style="color: #666;">Hospital:</strong>
-            <span style="color: #333;">{{ request.hospital_name }}</span>
+            <strong>Hospital:</strong>
+            <span>{{ request.hospital_name }}</span>
         </div>
         <div>
-            <strong style="color: #666;">City:</strong>
-            <span style="color: #333;">{{ request.city }}</span>
+            <strong>City:</strong>
+            <span>{{ request.city }}</span>
         </div>
         <div>
-            <strong style="color: #666;">Needed By:</strong>
-            <span style="color: #333;">{{ request.needed_by|human_date }}</span>
+            <strong>Needed By:</strong>
+            <span>{{ request.needed_by|human_date }}</span>
         </div>
         <div>
-            <strong style="color: #666;">Contact:</strong>
-            <span style="color: #333;">{{ request.contact_phone }}</span>
+            <strong>Contact:</strong>
+            <span>{{ request.contact_phone }}</span>
         </div>
     </div>
 
-    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
-        <strong style="color: #666;">Status:</strong>
-        <span style="
-            display: inline-block;
-            margin-left: 10px;
-            padding: 6px 12px;
-            border-radius: 4px;
-            font-size: 13px;
-            font-weight: 600;
-            {% if is_staff and request.status == 'pending_verification' %}
-                background-color: #fff3cd;
-                color: #856404;
-            {% elif request.status == 'active' %}
-                background-color: #d1ecf1;
-                color: #0c5460;
-            {% elif request.status == 'fulfilled' %}
-                background-color: #d4edda;
-                color: #155724;
-            {% else %}
-                background-color: #f8d7da;
-                color: #721c24;
-            {% endif %}
-        ">{{ request.status|replace('_', ' ')|title }}</span>
+    <div class="status-line">
+        <strong>Status:</strong>
+        <span class="status-chip status-{{ request.status }}">{{ request.status|replace('_', ' ')|title }}</span>
     </div>
 </div>
 
@@ -71,20 +52,20 @@
         nearest blood bank.
     </div>
     {% else %}
-    <div class="alert" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb;">
+    <div class="alert info">
         Your request is live — donors are being alerted.
     </div>
-    <div style="margin-top: 15px;">
+    <div class="wave-count">
         <strong>Wave 1:</strong> {{ tier_counts.exact }} exact,
         {{ tier_counts.compatible }} compatible,
         {{ tier_counts.far }} far
     </div>
     {% endif %}
-    <form method="POST" action="/request/{{ request.id }}/fulfill" style="margin-top: 15px;">
-        <button type="submit" class="btn">Mark as fulfilled</button>
+    <form method="POST" action="/request/{{ request.id }}/fulfill" class="inline-form">
+        <button type="submit" class="btn btn-secondary">Mark as fulfilled</button>
     </form>
-    <form method="POST" action="/request/{{ request.id }}/close-public" style="margin-top: 10px;">
-        <button type="submit" class="btn" style="background: #6c757d;">Close request</button>
+    <form method="POST" action="/request/{{ request.id }}/close-public" class="inline-form">
+        <button type="submit" class="btn btn-secondary">Close request</button>
     </form>
 {% elif request.status == 'verified' %}
     <div class="alert">Your request is live — donors are being alerted.</div>
@@ -96,7 +77,7 @@
 
 <section id="confirmed-donors" aria-live="polite">
     <h2>Confirmed donors</h2>
-    <p id="confirmed-donors-empty" {% if not confirmed_donors %}style="display: block;"{% else %}style="display: none;"{% endif %}>
+    <p id="confirmed-donors-empty" class="{% if confirmed_donors %}is-hidden{% endif %}">
         No donors have confirmed yet.
     </p>
     <ul id="confirmed-donors-list">
@@ -108,15 +89,12 @@
     </ul>
 </section>
 
-<div id="confirmation-popup" role="alertdialog" aria-live="assertive"
-     style="display: none; position: fixed; right: 20px; bottom: 20px; z-index: 10;
-            max-width:  min(90vw, 420px); padding: 18px; background: #fff;
-            border: 2px solid #28a745; border-radius: 8px; box-shadow: 0 4px 18px #0003;">
+<div id="confirmation-popup" class="confirmation-popup" role="alertdialog" aria-live="assertive">
     <button id="confirmation-popup-dismiss" type="button"
             aria-label="Dismiss confirmation">×</button>
     <p id="confirmation-popup-message"></p>
 </div>
-<div id="fulfilled-banner" class="alert" style="display: none;" role="status"></div>
+<div id="fulfilled-banner" class="alert success is-hidden" role="status"></div>
 
 <script>
 (function () {
@@ -130,7 +108,6 @@
     const popup = document.getElementById("confirmation-popup");
     const popupMessage = document.getElementById("confirmation-popup-message");
     const fulfilledBanner = document.getElementById("fulfilled-banner");
-    const popupQueue = [];
 
     function renderConfirmed(donors) {
         list.textContent = "";
@@ -144,16 +121,13 @@
         empty.style.display = donors.length ? "none" : "block";
     }
 
-    function showNextPopup() {
-        if (popup.style.display !== "none" || popupQueue.length === 0) return;
-        const message = popupQueue.shift();
+    function showPopup(message) {
         popupMessage.textContent = message;
         popup.style.display = "block";
     }
 
     document.getElementById("confirmation-popup-dismiss").addEventListener("click", function () {
         popup.style.display = "none";
-        showNextPopup();
     });
 
     function pollStatus() {
@@ -168,11 +142,10 @@
                 if (state.confirmed_count > lastConfirmedCount) {
                     state.confirmed.slice(lastConfirmedCount, state.confirmed_count)
                         .forEach(function (donor) {
-                            popupQueue.push("🎉 A donor has confirmed! " + donor.donor_name +
+                            showPopup("🎉 A donor has confirmed! " + donor.donor_name +
                                 " (" + donor.blood_group + ") is coming to donate. Contact: " +
                                 donor.donor_phone);
                         });
-                    showNextPopup();
                 }
                 lastConfirmedCount = state.confirmed_count;
                 if (state.confirmed_count >= state.units_needed &&
@@ -194,7 +167,7 @@
 })();
 </script>
 
-<div class="link-group" style="margin-top: 20px;">
+<div class="link-group">
     <a href="/">← Back to Home</a>
 </div>
 {% endblock %}

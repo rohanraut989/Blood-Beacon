@@ -1,184 +1,27 @@
 {% extends "base.html" %}
-
 {% block title %}Donor Match Preview - BloodBeacon{% endblock %}
-
 {% block content %}
-<h1>Donor Match Preview</h1>
-
-<div style="background: #d4edda; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #28a745;">
-    <strong style="color: #155724;">✓ Stage 2 Active</strong>
-    <p style="font-size: 13px; color: #155724; margin-top: 5px;">
-        This preview includes <strong>eligibility checks</strong> and <strong>blood-type compatibility filtering</strong>.
-        Eligible donors are ranked by exact blood match and area.
-    </p>
+<h1>Donor match preview</h1>
+<div class="alert success"><strong>Stage 2 Active</strong><br>Eligibility checks and blood-type compatibility filtering are active.</div>
+<section class="card card-pad">
+<h2>Request details</h2>
+<div class="grid-2 section-heading">
+<div><strong>Patient:</strong> {{ request.patient_name }}</div><div><strong>Blood Group:</strong> {{ request.blood_group }}</div>
+<div><strong>Hospital:</strong> {{ request.hospital_name }}</div><div><strong>City:</strong> {{ request.city }}</div>
+<div><strong>Component:</strong> {{ request.component }}</div><div><strong>Needed By:</strong> {{ request.needed_by }}</div>
 </div>
-
-<div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-    <h3 style="color: #333; margin-bottom: 10px;">Request Details</h3>
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; font-size: 14px;">
-        <div>
-            <strong style="color: #666;">Patient:</strong>
-            <span style="color: #333;">{{ request.patient_name }}</span>
-        </div>
-        <div>
-            <strong style="color: #666;">Blood Group:</strong>
-            <span style="color: #333;">{{ request.blood_group }}</span>
-        </div>
-        <div>
-            <strong style="color: #666;">Hospital:</strong>
-            <span style="color: #333;">{{ request.hospital_name }}</span>
-        </div>
-        <div>
-            <strong style="color: #666;">City:</strong>
-            <span style="color: #333;">{{ request.city }}</span>
-        </div>
-        <div>
-            <strong style="color: #666;">Component:</strong>
-            <span style="color: #333;">{{ request.component }}</span>
-        </div>
-        <div>
-            <strong style="color: #666;">Needed By:</strong>
-            <span style="color: #333;">{{ request.needed_by }}</span>
-        </div>
-    </div>
-</div>
-
+</section>
 {% if eligible_donors %}
-    <h3 style="color: #28a745; margin-bottom: 15px;">✓ Eligible Donors ({{ eligible_donors|length }})</h3>
-    {% if synthetic_data %}
-        <p style="background: #e7f3ff; border: 1px solid #b3d9ff; border-radius: 4px; padding: 10px; margin-bottom: 15px; font-size: 12px; color: #004085;">
-            ℹ️ <strong>Ranking by predicted show-up probability — model trained on synthetic history in this version.</strong>
-        </p>
-    {% endif %}
-    <div style="display: grid; gap: 12px; margin-bottom: 30px;">
-        {% for donor in eligible_donors %}
-            <div style="
-                border: 2px solid {% if donor.exact_match %}#28a745{% else %}#adb5bd{% endif %};
-                border-radius: 8px;
-                padding: 15px;
-                background: {% if donor.exact_match %}#f8fdf9{% else %}#f9f9f9{% endif %};
-                transition: box-shadow 0.2s;
-            " onmouseover="this.style.boxShadow='0 4px 12px rgba(40,167,69,0.15)'" 
-               onmouseout="this.style.boxShadow='none'">
-                <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1.5fr; gap: 15px; font-size: 14px;">
-                    <div>
-                        <strong style="color: #333;">{{ donor.name }}</strong>
-                        <p style="color: #666; font-size: 12px; margin-top: 3px;">
-                            {{ donor.area }}, {{ donor.city }}
-                        </p>
-                    </div>
-                    <div>
-                        <span style="
-                            display: inline-block;
-                            padding: 6px 12px;
-                            background: {% if donor.exact_match %}#28a745{% else %}#6c757d{% endif %};
-                            color: white;
-                            border-radius: 4px;
-                            font-weight: 600;
-                            font-size: 13px;
-                        ">{{ donor.blood_group }}</span>
-                        {% if not donor.exact_match %}
-                            <p style="font-size: 11px; color: #6c757d; margin-top: 3px;">Compatible</p>
-                        {% endif %}
-                    </div>
-                    <div style="text-align: center;">
-                        <span style="
-                            display: inline-block;
-                            padding: 6px 12px;
-                            background: #28a745;
-                            color: white;
-                            border-radius: 4px;
-                            font-weight: 600;
-                            font-size: 12px;
-                        ">ELIGIBLE</span>
-                    </div>
-                    <div style="text-align: right;">
-                        <strong style="font-size: 18px; color: #28a745;">{{ "%.0f"|format(donor.predicted_showup * 100) }}%</strong>
-                        <p style="font-size: 11px; color: #666; margin-top: 2px;">{{ donor.prediction_reason }}</p>
-                    </div>
-                </div>
-                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e8f5e9; font-size: 13px; color: #666;">
-                    <strong>Gender:</strong> {{ donor.gender }} | 
-                    <strong>Weight:</strong> {{ donor.weight_kg }} kg | 
-                    <strong>Age:</strong> {{ donor.age }} years
-                </div>
-            </div>
-        {% endfor %}
-    </div>
-{% else %}
-    <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 12px; margin-bottom: 20px; color: #856404;">
-        <strong>⚠️ No eligible donors found</strong> with compatible blood type in {{ request.city }}.
-    </div>
-{% endif %}
-
+<h2 class="section-heading">Eligible donors ({{ eligible_donors|length }})</h2>
+{% if synthetic_data %}<div class="alert info"><strong>Ranking by predicted show-up probability</strong> — model trained on synthetic history in this version.</div>{% endif %}
+<table class="table"><thead><tr><th>Donor</th><th>Group</th><th>Eligibility</th><th>Predicted response</th></tr></thead><tbody>
+{% for donor in eligible_donors %}<tr><td><strong>{{ donor.name }}</strong><br><small>{{ donor.area }}, {{ donor.city }}</small></td><td>{{ donor.blood_group }}{% if not donor.exact_match %}<br><small>Compatible</small>{% endif %}</td><td><span class="status-chip status-fulfilled">Eligible</span></td><td><strong>{{ "%.0f"|format(donor.predicted_showup * 100) }}%</strong><br><small>{{ donor.prediction_reason }}</small></td></tr>{% endfor %}
+</tbody></table>
+{% else %}<div class="alert warning"><strong>No eligible donors found</strong> with compatible blood type in {{ request.city }}.</div>{% endif %}
 {% if deferred_donors %}
-    <details style="
-        margin-top: 20px;
-        border: 1px solid #dee2e6;
-        border-radius: 8px;
-        padding: 0;
-        background: #f8f9fa;
-    ">
-        <summary style="
-            padding: 15px;
-            cursor: pointer;
-            font-weight: 600;
-            color: #dc3545;
-        ">
-            ⊕ Not Eligible Right Now ({{ deferred_donors|length }} deferred)
-        </summary>
-        <div style="padding: 15px; border-top: 1px solid #dee2e6; display: grid; gap: 12px;">
-            {% for donor in deferred_donors %}
-                <div style="
-                    border: 1px solid #f8b4c0;
-                    border-radius: 6px;
-                    padding: 12px;
-                    background: white;
-                ">
-                    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 15px; font-size: 14px;">
-                        <div>
-                            <strong style="color: #333;">{{ donor.name }}</strong>
-                            <p style="color: #666; font-size: 12px; margin-top: 3px;">
-                                {{ donor.area }}, {{ donor.city }}
-                            </p>
-                        </div>
-                        <div>
-                            <span style="
-                                display: inline-block;
-                                padding: 4px 8px;
-                                background: #f8f9fa;
-                                border: 1px solid #ddd;
-                                border-radius: 3px;
-                                font-size: 12px;
-                                color: #666;
-                            ">{{ donor.blood_group }}</span>
-                        </div>
-                    </div>
-                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #f0f0f0;">
-                        <p style="color: #dc3545; font-size: 13px; margin: 0; font-weight: 500;">
-                            Reasons: {{ donor.reasons|join(', ') }}
-                        </p>
-                        {% if donor.eligible_on %}
-                            <p style="color: #666; font-size: 12px; margin-top: 5px;">
-                                Eligible again: {{ donor.eligible_on }}
-                            </p>
-                        {% endif %}
-                    </div>
-                </div>
-            {% endfor %}
-        </div>
-    </details>
+<details class="card section-heading"><summary>Not eligible right now ({{ deferred_donors|length }} deferred)</summary>
+<table class="table"><tbody>{% for donor in deferred_donors %}<tr><td><strong>{{ donor.name }}</strong><br><small>{{ donor.area }}, {{ donor.city }}</small></td><td>{{ donor.blood_group }}</td><td>Reasons: {{ donor.reasons|join(', ') }}{% if donor.eligible_on %}<br><small>Eligible again: {{ donor.eligible_on }}</small>{% endif %}</td></tr>{% endfor %}</tbody></table>
+</details>
 {% endif %}
-
-{% if not eligible_donors and not deferred_donors %}
-    <div class="alert warning">
-        No donors found with compatible blood group in {{ request.city }}.
-    </div>
-{% endif %}
-
-<div class="link-group" style="margin-top: 30px;">
-    <a href="/request/{{ request.id }}">← Back to Request Status</a>
-    <a href="/">Home</a>
-</div>
+<div class="link-group"><a href="/">← Back to Home</a></div>
 {% endblock %}
-

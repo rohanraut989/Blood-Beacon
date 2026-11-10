@@ -3,40 +3,43 @@
 {% block content %}
 <h1>Staff console</h1>
 {% if not authenticated %}
-<p>Enter the staff passcode.</p>
+<div class="form-card">
+<p class="subtitle">Enter the staff passcode to continue.</p>
 <form method="POST" action="/staff/login">
-  <label for="passcode">Passcode</label>
-  <input id="passcode" name="passcode" type="password" required>
-  <button class="btn" type="submit">Enter</button>
+  <div class="form-group"><label for="passcode">Passcode</label><input id="passcode" name="passcode" type="password" required></div>
+  <button class="btn" type="submit">Enter console</button>
 </form>
+</div>
 {% else %}
-<p>Monitoring console. Staff authentication is demo-grade; production requires real accounts.</p>
+<p class="subtitle">Monitoring console. Staff authentication is demo-grade; production requires real accounts.</p>
 {% for status, requests in requests_by_status.items() %}
+<section class="section-heading">
 <h2>{{ status|replace('_', ' ')|title }}</h2>
 {% if requests %}
-<ul>
+<table class="table"><thead><tr><th>Request</th><th>Location</th><th>State</th><th>Action</th></tr></thead><tbody>
 {% for req in requests %}
-<li>
-  <strong>{{ req.patient_name }}</strong> — {{ req.city }} —
-  {{ req.status }}
-  {% if req.confirmed_donors %} — confirmed:
-    {% for donor in req.confirmed_donors %}{{ donor.first_name }}{% if not loop.last %}, {% endif %}{% endfor %}
-  {% endif %}
-  {% for outcome in req.wave_outcomes %}<div>{{ outcome.detail }}</div>{% endfor %}
-  {% if req.status == 'active' %}
-  <form method="POST" action="/request/{{ req.id }}/close" style="display:inline">
-    <input type="hidden" name="staff" value="1">
-    <button type="submit">Close request</button>
-  </form>
-  {% endif %}
-</li>
+<tr>
+  <td><strong>{{ req.patient_name }}</strong><br><small>{{ req.blood_group }} · {{ req.units|unit_int }} unit(s)</small>
+  {% if req.confirmed_donors %}<br><small>Confirmed:
+    {% for donor in req.confirmed_donors %}{{ donor.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+  </small>{% endif %}
+  {% for outcome in req.wave_outcomes %}<br><small>{{ outcome.detail }}</small>{% endfor %}</td>
+  <td>{{ req.hospital_name }}<br><small>{{ req.city }}</small></td>
+  <td><span class="status-chip status-{{ req.status }}">{{ req.status|replace('_', ' ')|title }}</span></td>
+  <td>{% if req.status == 'active' %}<form method="POST" action="/request/{{ req.id }}/close"><input type="hidden" name="staff" value="1"><button class="outline-danger" type="submit">Close request</button></form>{% else %}—{% endif %}</td>
+</tr>
 {% endfor %}
-</ul>
-{% else %}<p>None.</p>{% endif %}
+</tbody></table>
+{% else %}<p class="subtitle">None.</p>{% endif %}
+</section>
 {% endfor %}
-<h2>Donor directory</h2>
-<ul>{% for donor in donors %}<li>{{ donor.first_name }} {{ donor.last_name }} — {{ donor.blood_group }} — {{ donor.city }}</li>{% endfor %}</ul>
-<h2>Recent audit log</h2>
-<ul>{% for entry in audit_logs %}<li>{{ entry.action }} — {{ entry.detail }}</li>{% endfor %}</ul>
+<section class="section-heading"><h2>Donor directory</h2>
+<table class="table"><thead><tr><th>Name</th><th>Group</th><th>City</th></tr></thead><tbody>
+{% for donor in donors %}<tr><td>{{ donor.name }}</td><td>{{ donor.blood_group }}</td><td>{{ donor.city }}</td></tr>{% endfor %}
+</tbody></table></section>
+<section class="section-heading"><h2>Recent audit log</h2>
+<table class="table"><thead><tr><th>Action</th><th>Detail</th></tr></thead><tbody>
+{% for entry in audit_logs %}<tr><td>{{ entry.action }}</td><td>{{ entry.detail }}</td></tr>{% endfor %}
+</tbody></table></section>
 {% endif %}
 {% endblock %}

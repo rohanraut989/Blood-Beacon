@@ -3,6 +3,7 @@
 {% block title %}Register as Donor - BloodBeacon{% endblock %}
 
 {% block content %}
+<div class="form-card">
 <h1>Register as a Donor</h1>
 <p class="subtitle">Help save lives. Register once, stay ready.</p>
 
@@ -47,7 +48,7 @@
 
     <div class="form-group">
         <label for="phone">Mobile number *</label>
-        <div style="display: flex; align-items: center; gap: 8px;">
+        <div class="phone-row">
             <span id="country-code" aria-label="Country code">+91</span>
             <input type="tel" id="phone" name="phone" placeholder="10-digit national number" required>
         </div>
@@ -87,5 +88,6 @@
 
 <div class="link-group">
     <a href="/">← Back to Home</a>
+</div>
 </div>
 {% endblock %}
