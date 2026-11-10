@@ -90,6 +90,8 @@ class TestWhatsAppActivation:
             assert 'phone' in call.kwargs['json']
             assert 'message' in call.kwargs['json']
             assert 'O+' in call.kwargs['json']['message']  # Blood group in message
+            assert 'Patient needs O+ blood at Test Hospital, Kathmandu.' in call.kwargs['json']['message']
+            assert 'Did you donate blood in the last 3 months?' in call.kwargs['json']['message']
     
     @patch('app.requests.post')
     def test_activation_creates_whatsapp_alerts(self, mock_post, client):
@@ -321,6 +323,39 @@ class TestWhatsAppWave2:
         # We expect at least Wave 1 activation calls + potentially Wave 2 calls
         assert mock_post.call_count >= 0  # May not be called if Wave 2 logic didn't fire
 
+    def test_simulator_uses_two_step_conversation(self, client, monkeypatch):
+        """Simulator advances recency first, then confirmation on the next step."""
+        donor = mock_db.insert_donor(
+            name="Simulator Donor", blood_group="O+", city="Kathmandu",
+            area="Thamel", phone="+977-1-888001", gender="M",
+            date_of_birth="1990-01-01", weight_kg=70
+        )
+        req = mock_db.insert_request(
+            patient_name="Patient", blood_group="O+", component="whole_blood",
+            units=1, hospital_name="Test Hospital", city="Kathmandu",
+            needed_by="2024-11-20", contact_phone="+977-1-555555",
+            created_by="staff"
+        )
+        mock_db.verify_request(req["id"], "staff_test")
+        mock_db.update_request_status(req["id"], "active")
+        mock_db.insert_alert(req["id"], donor["id"], 1, "simulator")
+
+        replies = iter(["confirmed", "confirmed"])
+        monkeypatch.setattr(
+            app_module.alerting,
+            "determine_reply",
+            lambda donor, score, seeded_rng: next(replies)
+        )
+
+        client.post(f"/request/{req['id']}/advance?staff=1")
+        assert mock_db.get_alerts_for_request(req["id"])[0]["stage"] == "awaiting_confirm"
+
+        client.post(f"/request/{req['id']}/advance?staff=1")
+        saved_alert = mock_db.get_alerts_for_request(req["id"])[0]
+        assert saved_alert["reply"] == "confirmed"
+        assert saved_alert["stage"] == "done"
+        assert mock_db.get_request(req["id"])["status"] == "fulfilled"
+
 class TestBridgeStatus:
     """Tests for bridge status display."""
     
@@ -441,4 +476,3 @@ class TestBridgeStatus:
         
         assert response.status_code == 200
         assert "WhatsApp Bridge" not in response.data.decode()
-

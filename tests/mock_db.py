@@ -11,7 +11,7 @@ _test_rules = {}
 _test_audit_log = {}
 _test_staff = {}
 
-_id_counter = {"donors": 0, "donations": 0, "requests": 0, "rules": 0, "audit_log": 0}
+_id_counter = {"donors": 0, "donations": 0, "requests": 0, "rules": 0, "audit_log": 0, "alerts": 0}
 
 def reset():
     """Clear all test data."""
@@ -23,7 +23,7 @@ def reset():
     _test_audit_log = {}
     _test_alerts = {}
     _test_staff = {}
-    _id_counter = {"donors": 0, "donations": 0, "requests": 0, "rules": 0, "audit_log": 0}
+    _id_counter = {"donors": 0, "donations": 0, "requests": 0, "rules": 0, "audit_log": 0, "alerts": 0}
 
 def is_db_configured():
     return True
@@ -182,7 +182,9 @@ def insert_alert(request_id, donor_id, wave_no, channel):
         "wave_no": wave_no,
         "channel": channel,
         "sent_at": "2024-01-01T00:00:00Z",
+        "stage": "awaiting_recency",
         "reply": None,
+        "message_id": None,
         "replied_at": None,
         "showed_up": None,
         "created_at": "2024-01-01",  # Date format only for alerting.py parsing
@@ -194,11 +196,21 @@ def get_alerts_for_request(request_id):
     """Get all alerts for a request."""
     return [a for a in _test_alerts.values() if a["request_id"] == request_id]
 
-def update_alert_reply(alert_id, reply, message_id=None):
+def update_alert_reply(alert_id, reply, message_id=None, stage="done"):
     """Update an alert with a donor's reply."""
     if alert_id in _test_alerts:
         _test_alerts[alert_id]["reply"] = reply
+        _test_alerts[alert_id]["stage"] = stage
         _test_alerts[alert_id]["replied_at"] = "2024-01-01T00:00:00Z"
+        if message_id:
+            _test_alerts[alert_id]["message_id"] = message_id
+        return _test_alerts[alert_id]
+    return None
+
+def update_alert_stage(alert_id, stage, message_id=None):
+    """Advance an alert conversation without recording a final reply."""
+    if alert_id in _test_alerts:
+        _test_alerts[alert_id]["stage"] = stage
         if message_id:
             _test_alerts[alert_id]["message_id"] = message_id
         return _test_alerts[alert_id]

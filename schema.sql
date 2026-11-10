@@ -62,7 +62,9 @@ CREATE TABLE IF NOT EXISTS alerts (
   wave_no INT NOT NULL,
   sent_at TIMESTAMP WITH TIME ZONE,
   channel TEXT NOT NULL CHECK (channel IN ('whatsapp', 'simulator')),
+  stage TEXT NOT NULL DEFAULT 'awaiting_recency' CHECK (stage IN ('awaiting_recency', 'awaiting_confirm', 'done')),
   reply TEXT CHECK (reply IN ('confirmed', 'donated_recently', 'declined', 'no_reply')),
+  message_id TEXT,
   replied_at TIMESTAMP WITH TIME ZONE,
   showed_up BOOLEAN,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP

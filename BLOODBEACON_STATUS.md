@@ -1171,3 +1171,30 @@ Ready for deployment. All staff UX improvements complete and tested.
 > The audit also found that application code writes the `verified` request status,
 > so that value is now included in the schema check constraint. All other `BIGINT`
 > identifiers and foreign keys match the numeric IDs written by the application.
+
+---
+
+## Two-Step Donor Conversation: Recency First
+
+**Status:** ✅ COMPLETE
+
+WhatsApp and simulator alerts now use the same staged conversation:
+
+1. `awaiting_recency`: asks whether the donor donated in the last three months.
+   Reply `1` records a today's `self_report` donation, marks the alert
+   `donated_recently`/`done`, sends a thank-you, and ends the conversation.
+   Reply `2` advances to `awaiting_confirm`.
+2. `awaiting_confirm`: asks whether the donor can come to the hospital.
+   Reply `1` records `confirmed` and runs the existing fulfilment/number-reveal
+   rules. Reply `2` records `declined` and ends the conversation.
+3. Unclear text re-asks the current step without advancing the stage.
+
+The alert schema and mock now include `stage` values
+`awaiting_recency`, `awaiting_confirm`, and `done`; message IDs remain
+deduplicated. The former single-step `1 = confirmed, 2 = donated_recently,
+3 = declined` mapping was removed because it conflated recency screening with
+availability. `LIVE_TEST.md` documents the revised real-device script.
+
+**Verification:** 137 Flask tests pass, including the two-step happy path,
+recency deferral through the eligibility engine, Step 2 decline, unclear-text
+re-asks, and simulator parity.

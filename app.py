@@ -421,25 +421,42 @@ def activate_request(request_id):
     return redirect(url_for("request_status", request_id=request_id, staff=1))
 
 
-def _send_whatsapp_alert(donor, req):
-    """Send WhatsApp alert to a donor."""
+def _patient_first_name(req):
+    """Return only the patient's first name for donor-facing messages."""
+    return (req.get("patient_name") or "A patient").split()[0]
+
+def _recency_message(req):
+    return (
+        f"{_patient_first_name(req)} needs {req.get('blood_group')} blood at "
+        f"{req.get('hospital_name')}, {req.get('city')}. "
+        "Did you donate blood in the last 3 months? Reply 1 = Yes, 2 = No"
+    )
+
+def _confirm_message(req):
+    return (
+        f"You can save a life today. Can you come to {req.get('hospital_name')} "
+        f"to donate? Reply 1 = Yes, I can come, 2 = Not this time"
+    )
+
+def _send_whatsapp_message(phone, message):
+    """Send one donor-facing WhatsApp message through the bridge."""
     try:
         bridge_url = os.getenv("BRIDGE_URL", "http://127.0.0.1:3100")
         bridge_secret = os.getenv("BRIDGE_SECRET", "")
-        
-        message = f"BloodBeacon: {req.get('blood_group')} blood needed at {req.get('hospital_name')}. Reply 1 (I can donate), 2 (I donated recently), or 3 (Not now)."
-        
         response = requests.post(
             f"{bridge_url}/send",
-            json={"phone": donor["phone"], "message": message},
+            json={"phone": phone, "message": message},
             headers={"X-Bridge-Secret": bridge_secret},
             timeout=30
         )
-        
         if response.status_code != 200:
-            print(f"Failed to send WhatsApp alert to {donor['id']}: {response.status_code}")
+            print(f"Failed to send WhatsApp message to {phone}: {response.status_code}")
     except Exception as e:
-        print(f"Error sending WhatsApp alert to {donor['id']}: {e}")
+        print(f"Error sending WhatsApp message to {phone}: {e}")
+
+def _send_whatsapp_alert(donor, req):
+    """Send the first step of the donor conversation."""
+    _send_whatsapp_message(donor["phone"], _recency_message(req))
 
 # === STAGE 4 SIMULATOR ===
 
@@ -469,22 +486,36 @@ def advance_simulation(request_id):
     # Seed RNG per-request for reproducible simulation
     seeded_rng = random.Random(request_id)
     
-    # Process Wave 1 replies (seeded simulation)
+    # Process pending conversation steps (seeded simulation).
     confirmed_count = 0
-    for alert in wave1_alerts:
-        if alert.get("reply") is None:
-            # Simulate reply based on predictor score
-            donor = db.get_donor(alert["donor_id"])
-            
-            # Get donor's predicted score from ranking
-            # (For now, we'll use a simple placeholder; in real code, we'd store it)
-            score = 0.5  # Neutral default
-            
-            reply = alerting.determine_reply(donor, score, seeded_rng)
-            
-            db.update_alert_reply(alert["id"], reply)
-            if reply == "confirmed":
+    for alert in alerts:
+        if alert.get("reply") is not None or alert.get("stage", "awaiting_recency") == "done":
+            if alert.get("reply") == "confirmed":
                 confirmed_count += 1
+            continue
+
+        donor = db.get_donor(alert["donor_id"])
+        score = 0.5
+        reply = alerting.determine_reply(donor, score, seeded_rng)
+        stage = alert.get("stage", "awaiting_recency")
+
+        if stage == "awaiting_recency":
+            if reply == "confirmed":
+                # Simulation's positive propensity means the donor is not recent.
+                db.update_alert_stage(alert["id"], "awaiting_confirm")
+            elif reply == "declined":
+                db.insert_donation(
+                    donor_id=donor["id"],
+                    donated_on=date.today().isoformat(),
+                    units=1,
+                    source="self_report",
+                )
+                db.update_alert_reply(alert["id"], "donated_recently", stage="done")
+        elif stage == "awaiting_confirm":
+            if reply in ("confirmed", "declined"):
+                db.update_alert_reply(alert["id"], reply, stage="done")
+                if reply == "confirmed":
+                    confirmed_count += 1
     
     # Check if fulfilled
     if confirmed_count >= req.get("units", 1):
@@ -952,10 +983,10 @@ def whatsapp_reply():
             if alert.get("message_id") == message_id:
                 return {"status": "already_processed"}, 200
         
-        # Find pending alert (one with no reply yet)
+        # Find the donor's current conversation (one that is not done).
         matching_alert = None
         for alert in all_alerts:
-            if alert.get("reply") is None:  # Pending (no reply yet)
+            if alert.get("stage", "awaiting_recency") != "done" and alert.get("reply") is None:
                 matching_alert = alert
                 break
         
@@ -968,37 +999,55 @@ def whatsapp_reply():
         if not request_obj:
             return {"status": "request_not_found"}, 200
         
-        reply_mapping = {"1": "confirmed", "2": "donated_recently", "3": "declined"}
-        processed_reply = reply_mapping.get(text.strip(), None)
-        
-        if processed_reply is None:
-            # Invalid reply; send polite re-ask via bridge
-            bridge_url = os.getenv("BRIDGE_URL", "http://127.0.0.1:3100")
-            bridge_secret = os.getenv("BRIDGE_SECRET", "")
-            try:
-                requests.post(
-                    f"{bridge_url}/send",
-                    json={"phone": phone, "message": "BloodBeacon: please reply 1 (I can donate), 2 (I donated recently), or 3 (Not now)."},
-                    headers={"X-Bridge-Secret": bridge_secret},
-                    timeout=30
+        stage = matching_alert.get("stage", "awaiting_recency")
+        if stage == "awaiting_recency":
+            if text == "1":
+                db.update_alert_reply(
+                    matching_alert["id"], "donated_recently",
+                    message_id=message_id, stage="done"
                 )
-            except Exception as e:
-                print(f"Failed to send re-ask to {phone}: {e}")
-            return {"status": "invalid_reply_reask_sent"}, 200
-        
-        # Record the reply
-        db.update_alert_reply(matching_alert["id"], processed_reply, message_id=message_id)
-        db.update_alert_showup(matching_alert["id"], True)
-        
-        # Handle "donated_recently": insert self-report donation
-        if processed_reply == "donated_recently":
-            db.insert_donation(
-                donor_id=donor["id"],
-                donated_on=date.today().isoformat(),
-                units=1,
-                source="self_report"
+                db.update_alert_showup(matching_alert["id"], False)
+                db.insert_donation(
+                    donor_id=donor["id"],
+                    donated_on=date.today().isoformat(),
+                    units=1,
+                    source="self_report"
+                )
+                _send_whatsapp_message(
+                    phone,
+                    "Thank you for letting us know. Please take care of yourself — "
+                    "we will contact you when you are eligible again."
+                )
+                return {"status": "reply_recorded", "reply": "donated_recently"}, 200
+            if text == "2":
+                db.update_alert_stage(matching_alert["id"], "awaiting_confirm", message_id=message_id)
+                _send_whatsapp_message(phone, _confirm_message(request_obj))
+                return {"status": "awaiting_confirm"}, 200
+            _send_whatsapp_message(
+                phone,
+                f"Please reply 1 = Yes, 2 = No. {_recency_message(request_obj)}"
             )
-        
+            return {"status": "invalid_reply_reask_sent", "stage": stage}, 200
+
+        if stage == "awaiting_confirm":
+            if text == "1":
+                processed_reply = "confirmed"
+            elif text == "2":
+                processed_reply = "declined"
+            else:
+                _send_whatsapp_message(
+                    phone,
+                    "Please reply 1 = Yes, I can come, 2 = Not this time. "
+                    f"{_confirm_message(request_obj)}"
+                )
+                return {"status": "invalid_reply_reask_sent", "stage": stage}, 200
+
+            db.update_alert_reply(
+                matching_alert["id"], processed_reply,
+                message_id=message_id, stage="done"
+            )
+            db.update_alert_showup(matching_alert["id"], processed_reply == "confirmed")
+
         # Re-evaluate request: check if fulfilled
         confirmed_count = 0
         alerts_for_request = db.get_alerts_for_request(matching_alert["request_id"])

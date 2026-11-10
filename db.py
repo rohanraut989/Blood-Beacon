@@ -210,13 +210,26 @@ def get_alerts_for_request(request_id: int) -> list:
     result = db.table("alerts").select("*").eq("request_id", request_id).execute()
     return result.data if result.data else []
 
-def update_alert_reply(alert_id: int, reply: str) -> dict:
+def update_alert_reply(alert_id: int, reply: str, message_id: str = None, stage: str = "done") -> dict:
     """Update an alert with a donor's reply."""
     db = get_db()
-    result = db.table("alerts").update({
+    update_data = {
         "reply": reply,
+        "stage": stage,
         "replied_at": datetime.now().isoformat(),
-    }).eq("id", alert_id).execute()
+    }
+    if message_id:
+        update_data["message_id"] = message_id
+    result = db.table("alerts").update(update_data).eq("id", alert_id).execute()
+    return result.data[0] if result.data else None
+
+def update_alert_stage(alert_id: int, stage: str, message_id: str = None) -> dict:
+    """Advance an alert conversation without recording a final reply."""
+    db = get_db()
+    update_data = {"stage": stage}
+    if message_id:
+        update_data["message_id"] = message_id
+    result = db.table("alerts").update(update_data).eq("id", alert_id).execute()
     return result.data[0] if result.data else None
 
 def update_alert_showup(alert_id: int, showed_up: bool) -> dict:

@@ -63,26 +63,28 @@ This script demonstrates a two-phone end-to-end test of the WhatsApp bridge inte
 ### Step 5: Bridge Sends Wave 1 Alert (Automatic)
 
 - The bridge should immediately POST to Flask `/internal/whatsapp-reply` handler.
-- **Donor phone** receives: *"BloodBeacon: O+ blood needed at Test Hospital, Kathmandu by [DATE]. Reply 1 = I can donate, 2 = I donated recently, 3 = Not now."*
+- **Donor phone** receives Step 1: *"Patient needs O+ blood at Test Hospital, Kathmandu. Did you donate blood in the last 3 months? Reply 1 = Yes, 2 = No"*
 
 ### Step 6: Donor Replies (Donor Phone)
 
-**Test Case A: Donor Can Contribute (Reply "1")**
+**Test Case A: Donor Can Contribute (Reply "2", then "1")**
 
-1. On donor phone, reply to the BloodBeacon message with: `1`
-2. Wait ~5 seconds.
-3. Go to request details page (hospital phone).
-4. Click **Refresh** or reload.
+1. On donor phone, reply to Step 1 with: `2`.
+2. The donor receives Step 2: *"You can save a life today. Can you come to Test Hospital to donate? Reply 1 = Yes, I can come, 2 = Not this time."*
+3. Reply with: `1`.
+4. Wait ~5 seconds.
+5. Go to request details page (hospital phone).
+6. Click **Refresh** or reload.
 5. **Verify:**
    - Alert status shows "confirmed"
    - Dashboard counter increments
    - If 2 units confirmed, request shows "Fulfilled" ✅
 
-**Test Case B: Donor Donated Recently (Reply "2")**
+**Test Case B: Donor Donated Recently (Reply "1")**
 
 1. Create a **second request** (same as Step 3).
 2. Verify and activate on whatsapp.
-3. Donor replies with: `2`
+3. Donor replies with: `1`
 4. Wait ~5 seconds.
 5. **Verify:**
    - Alert status shows "donated_recently"
@@ -90,13 +92,13 @@ This script demonstrates a two-phone end-to-end test of the WhatsApp bridge inte
    - On the **donor's profile** (staff view), eligible badge changes to "Deferred"
    - If trying to request from this donor again, they appear ineligible
 
-**Test Case C: Invalid Reply → Re-ask**
+**Test Case C: Invalid Reply → Re-ask the Same Step**
 
 1. Create a third request, activate on whatsapp.
-2. Donor replies with: `xyz` (invalid).
+2. Donor replies with: `xyz` (invalid) to either question.
 3. Wait ~10 seconds.
-4. Donor receives another message: *"BloodBeacon: please reply 1 (I can donate), 2 (I donated recently), or 3 (Not now)."*
-5. Donor replies with: `3` (declined).
+4. Donor receives a polite re-ask of the same question; the alert stage does not change.
+5. If the donor is on Step 2, reply with `2` (declined). If still on Step 1, reply with `2` to advance to Step 2.
 6. **Verify:**
    - Alert status shows "declined"
    - Request not fulfilled (awaits Wave 2 or manual override)
@@ -139,10 +141,10 @@ curl http://127.0.0.1:3100/status \
 - ✅ Bridge QR scan links spare number
 - ✅ Staff can verify and activate on WhatsApp channel
 - ✅ Wave 1 alerts sent via WhatsApp
-- ✅ Donor replies "1" → alert confirmed, request shows progress
-- ✅ Donor replies "2" → donation logged, cooldown applied
-- ✅ Donor replies "3" → alert declined, awaits Wave 2
-- ✅ Invalid reply → polite re-ask, one re-attempt
+- ✅ Donor replies "2" then "1" → alert confirmed, request shows progress
+- ✅ Donor replies "1" to Step 1 → donation logged, cooldown applied, thank-you sent
+- ✅ Donor replies "2" to Step 2 → alert declined, awaits Wave 2
+- ✅ Invalid reply → polite re-ask of the same step without stage advancement
 - ✅ Request fulfilled when units met
 - ✅ Audit log captures all WhatsApp actions
 - ✅ Donor directory shows updated eligibility badges
