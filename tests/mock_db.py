@@ -156,3 +156,44 @@ def insert_audit_log(actor, action, entity, entity_id=None, detail=None):
 def get_alerts_for_donor(donor_id):
     """Get all alerts for a donor (returns empty list if no alerts table)."""
     return []  # Mock: no alert history yet
+
+# === ALERTS (Stage 4+) ===
+
+_test_alerts = {}
+
+def insert_alert(request_id, donor_id, wave_no, channel):
+    """Insert an alert for a request."""
+    _id_counter["alerts"] = _id_counter.get("alerts", 0) + 1
+    alert = {
+        "id": _id_counter["alerts"],
+        "request_id": request_id,
+        "donor_id": donor_id,
+        "wave_no": wave_no,
+        "channel": channel,
+        "sent_at": "2024-01-01T00:00:00Z",
+        "reply": None,
+        "replied_at": None,
+        "showed_up": None,
+        "created_at": "2024-01-01T00:00:00Z",
+    }
+    _test_alerts[alert["id"]] = alert
+    return alert
+
+def get_alerts_for_request(request_id):
+    """Get all alerts for a request."""
+    return [a for a in _test_alerts.values() if a["request_id"] == request_id]
+
+def update_alert_reply(alert_id, reply):
+    """Update an alert with a donor's reply."""
+    if alert_id in _test_alerts:
+        _test_alerts[alert_id]["reply"] = reply
+        _test_alerts[alert_id]["replied_at"] = "2024-01-01T00:00:00Z"
+        return _test_alerts[alert_id]
+    return None
+
+def update_alert_showup(alert_id, showed_up):
+    """Mark an alert as showed_up."""
+    if alert_id in _test_alerts:
+        _test_alerts[alert_id]["showed_up"] = showed_up
+        return _test_alerts[alert_id]
+    return None

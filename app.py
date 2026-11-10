@@ -4,12 +4,14 @@ Flask application
 """
 
 import os
-from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, flash
+import random
+from datetime import datetime, date
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 import db
 import eligibility
 import compatibility
 import predictor
+import alerting
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
@@ -138,7 +140,287 @@ def request_status(request_id):
         flash("Request not found.", "error")
         return redirect(url_for("home"))
 
-    return render_template("request_status.html", request=req)
+    # Check if staff mode is enabled
+    is_staff = request.args.get("staff") == "1"
+    
+    # Get alerts for this request (if any)
+    alerts = db.get_alerts_for_request(request_id)
+    
+    # Build alert details with donor info
+    alert_details = []
+    for alert in alerts:
+        donor = db.get_donor(alert["donor_id"])
+        alert_with_donor = dict(alert)
+        alert_with_donor["donor"] = donor
+        alert_details.append(alert_with_donor)
+
+    return render_template(
+        "request_status.html",
+        request=req,
+        is_staff=is_staff,
+        alerts=alert_details
+    )
+
+@app.route("/request/<int:request_id>/activate", methods=["POST"])
+def activate_request(request_id):
+    """Activate a request and send Wave 1 alerts (simulator channel)."""
+    if not db.is_db_configured():
+        flash("Database not configured.", "error")
+        return redirect(url_for("home"))
+
+    req = db.get_request(request_id)
+    if not req:
+        flash("Request not found.", "error")
+        return redirect(url_for("home"))
+    
+    # Only pending_verification requests can be activated
+    if req["status"] != "pending_verification":
+        flash("Request must be pending verification to activate.", "error")
+        return redirect(url_for("request_status", request_id=request_id, staff=1))
+    
+    # Get eligible donors and rank them
+    all_donors = db.get_donors_by_city(req["city"])
+    
+    rules_list = db.get_all_rules()
+    rules_dict = {r["key"]: r["value"] for r in rules_list}
+    
+    today = date.today()
+    eligible_donors = []
+    
+    donations_by_donor = {}
+    alerts_by_donor = {}
+    
+    for donor in all_donors:
+        # Check blood type compatibility
+        if not compatibility.is_compatible(donor["blood_group"], req["blood_group"], req.get("component", "whole_blood")):
+            continue
+        
+        donations = db.get_donations_for_donor(donor["id"])
+        donations_by_donor[donor["id"]] = donations
+        alerts = db.get_alerts_for_donor(donor["id"])
+        alerts_by_donor[donor["id"]] = alerts
+        
+        # Assess eligibility
+        assessment = eligibility.assess_donor(donor, donations, rules_dict, today)
+        
+        donor_info = dict(donor)
+        donor_info["eligibility_status"] = assessment["status"]
+        
+        if assessment["status"] == "eligible":
+            eligible_donors.append(donor_info)
+    
+    # Rank eligible donors
+    ranked_with_scores = predictor.rank_donors(
+        req,
+        eligible_donors,
+        donations_by_donor,
+        alerts_by_donor,
+        today
+    )
+    
+    # Convert to just donor dicts for planner
+    ranked_donors = [donor for donor, score, reason in ranked_with_scores]
+    
+    # Plan waves
+    now = datetime.now()
+    plan = alerting.plan_waves(ranked_with_scores, req, alerts_by_donor, now)
+    
+    # Activate request
+    db.update_request_status(request_id, "active")
+    
+    # Write Wave 1 alerts
+    wave1_donors = plan["wave1"]
+    for donor in wave1_donors:
+        db.insert_alert(
+            request_id=request_id,
+            donor_id=donor["id"],
+            wave_no=1,
+            channel="simulator"
+        )
+    
+    # Write audit log
+    db.insert_audit_log(
+        actor="staff_simulator",
+        action="activate_request",
+        entity="request",
+        entity_id=request_id,
+        detail=f"Activated with Wave 1: {len(wave1_donors)} donors, Wave 2: {len(plan['wave2'])} donors queued"
+    )
+    
+    flash(f"Request activated! {len(wave1_donors)} donors alerted in Wave 1.", "success")
+    return redirect(url_for("request_status", request_id=request_id, staff=1))
+
+# === STAGE 4 SIMULATOR ===
+
+@app.route("/request/<int:request_id>/advance", methods=["POST"])
+def advance_simulation(request_id):
+    """Advance the simulator: process pending replies and fire Wave 2 if needed."""
+    if not db.is_db_configured():
+        flash("Database not configured.", "error")
+        return redirect(url_for("home"))
+
+    req = db.get_request(request_id)
+    if not req:
+        flash("Request not found.", "error")
+        return redirect(url_for("home"))
+    
+    # Get all alerts for this request
+    alerts = db.get_alerts_for_request(request_id)
+    
+    # Separate by wave
+    wave1_alerts = [a for a in alerts if a["wave_no"] == 1]
+    wave2_alerts = [a for a in alerts if a["wave_no"] == 2]
+    
+    # Seed RNG per-request for reproducible simulation
+    seeded_rng = random.Random(request_id)
+    
+    # Process Wave 1 replies (seeded simulation)
+    confirmed_count = 0
+    for alert in wave1_alerts:
+        if alert.get("reply") is None:
+            # Simulate reply based on predictor score
+            donor = db.get_donor(alert["donor_id"])
+            
+            # Get donor's predicted score from ranking
+            # (For now, we'll use a simple placeholder; in real code, we'd store it)
+            score = 0.5  # Neutral default
+            
+            reply = alerting.determine_reply(donor, score, seeded_rng)
+            
+            db.update_alert_reply(alert["id"], reply)
+            if reply == "confirmed":
+                confirmed_count += 1
+    
+    # Check if fulfilled
+    if confirmed_count >= req.get("units", 1):
+        # Request is fulfilled!
+        db.update_request_status(request_id, "fulfilled")
+        db.insert_audit_log(
+            actor="simulator",
+            action="fulfill_request",
+            entity="request",
+            entity_id=request_id,
+            detail=f"Fulfilled with {confirmed_count} confirmed donors"
+        )
+        flash(f"Request fulfilled! {confirmed_count} donors confirmed.", "success")
+    else:
+        # Not enough confirmations, fire Wave 2
+        all_donors = db.get_donors_by_city(req["city"])
+        
+        rules_list = db.get_all_rules()
+        rules_dict = {r["key"]: r["value"] for r in rules_list}
+        
+        today = date.today()
+        eligible_donors = []
+        donations_by_donor = {}
+        alerts_by_donor = {}
+        
+        for donor in all_donors:
+            if not compatibility.is_compatible(donor["blood_group"], req["blood_group"], req.get("component", "whole_blood")):
+                continue
+            
+            donations = db.get_donations_for_donor(donor["id"])
+            donations_by_donor[donor["id"]] = donations
+            alerts = db.get_alerts_for_donor(donor["id"])
+            alerts_by_donor[donor["id"]] = alerts
+            
+            assessment = eligibility.assess_donor(donor, donations, rules_dict, today)
+            donor_info = dict(donor)
+            donor_info["eligibility_status"] = assessment["status"]
+            
+            if assessment["status"] == "eligible":
+                eligible_donors.append(donor_info)
+        
+        # Rank eligible donors
+        ranked_with_scores = predictor.rank_donors(
+            req,
+            eligible_donors,
+            donations_by_donor,
+            alerts_by_donor,
+            today
+        )
+        
+        # Plan waves
+        now = datetime.now()
+        plan = alerting.plan_waves(ranked_with_scores, req, alerts_by_donor, now)
+        
+        # Write Wave 2 alerts (exclude donors already alerted in Wave 1)
+        wave1_donor_ids = set(a["donor_id"] for a in wave1_alerts)
+        wave2_donors = [d for d in plan["wave2"] if d["id"] not in wave1_donor_ids]
+        
+        for donor in wave2_donors:
+            db.insert_alert(
+                request_id=request_id,
+                donor_id=donor["id"],
+                wave_no=2,
+                channel="simulator"
+            )
+        
+        # Write audit log
+        db.insert_audit_log(
+            actor="simulator",
+            action="fire_wave2",
+            entity="request",
+            entity_id=request_id,
+            detail=f"Wave 1 had {confirmed_count}/{req.get('units', 1)} confirmations, firing Wave 2 with {len(wave2_donors)} donors"
+        )
+        
+        flash(f"Wave 1 had {confirmed_count} confirmations (needed {req.get('units', 1)}). Firing Wave 2 with {len(wave2_donors)} donors.", "info")
+    
+    return redirect(url_for("request_status", request_id=request_id, staff=1))
+
+@app.route("/request/<int:request_id>/donor/<int:donor_id>/mark-donated", methods=["POST"])
+def mark_donated(request_id, donor_id):
+    """Mark a confirmed donor as having donated."""
+    if not db.is_db_configured():
+        flash("Database not configured.", "error")
+        return redirect(url_for("home"))
+
+    req = db.get_request(request_id)
+    if not req:
+        flash("Request not found.", "error")
+        return redirect(url_for("home"))
+    
+    donor = db.get_donor(donor_id)
+    if not donor:
+        flash("Donor not found.", "error")
+        return redirect(url_for("request_status", request_id=request_id, staff=1))
+    
+    # Find the alert for this donor
+    alerts = db.get_alerts_for_request(request_id)
+    alert = next((a for a in alerts if a["donor_id"] == donor_id), None)
+    
+    if not alert:
+        flash("No alert found for this donor.", "error")
+        return redirect(url_for("request_status", request_id=request_id, staff=1))
+    
+    if alert.get("reply") != "confirmed":
+        flash("Only confirmed donors can be marked as donated.", "error")
+        return redirect(url_for("request_status", request_id=request_id, staff=1))
+    
+    # Write donations row
+    db.insert_donation(
+        donor_id=donor_id,
+        donated_on=date.today(),
+        units=1,
+        request_id=request_id,
+        source="simulator"
+    )
+    
+    # Mark alert as showed_up
+    db.update_alert_showup(alert["id"], True)
+    
+    # Write audit log
+    db.insert_audit_log(
+        actor="staff",
+        action="mark_donated",
+        entity="donor",
+        entity_id=donor_id,
+        detail=f"Marked as donated for request {request_id}"
+    )
+    
+    flash(f"{donor['name']} marked as donated.", "success")
+    return redirect(url_for("request_status", request_id=request_id, staff=1))
 
 # === STAGE 1 MATCH PREVIEW ===
 

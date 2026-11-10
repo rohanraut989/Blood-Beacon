@@ -420,10 +420,120 @@ None. All Stage 1 + Stage 2 + Stage 2.1 + Stage 3 objectives complete and all 56
 
 ---
 
+## Stage 4: Wave Alerting + Simulator
+
+**Objective:** Implement wave-based donor alerting, seeded reply simulation, and simulator controls for testing fulfillment, privacy, and mark-donated flows.
+
+**Status:** ✅ COMPLETE
+
+### What Was Built
+
+1. **Pure Wave Planner (`alerting.py`)**
+   - `plan_waves(ranked_eligible, request, alerts_by_donor, now)` — Divides eligible donors into:
+     - Wave 1 ≤ 10 donors (priority matches + high predicted responders)
+     - Wave 2 ≤ 20 donors (queued if Wave 1 insufficient)
+   - Anti-spam: Donors with 4+ alerts in last 30 days skipped (marked with "monthly cap" reason)
+   - Quiet hours check (21:00-08:00): Recorded as policy note, does not block simulator alerts
+
+2. **Deterministic Reply Simulator (`alerting.py`)**
+   - `determine_reply(donor, score, seeded_rng)` → "confirmed" | "declined" | "no_reply"
+   - Uses per-request seeded RNG (seed = request_id) for reproducible testing
+   - High score (>0.7) → 70% confirm, 20% decline, 10% no_reply
+   - Medium score (0.3-0.7) → 30% confirm, 40% decline, 30% no_reply
+   - Low score (<0.3) → 5% confirm, 70% decline, 25% no_reply
+
+3. **Activation Flow**
+   - `/request/<id>/activate` (POST) — Staff endpoint to activate pending_verification request
+   - On activate:
+     - Get eligible donors (compatibility + eligibility filter)
+     - Rank via Stage 3 predictor
+     - Call plan_waves() to assign donors to Wave 1/2
+     - Write Wave 1 alerts to DB (channel="simulator")
+     - Change request status to "active"
+     - Log to audit_log
+
+4. **Simulator Advance Logic**
+   - `/request/<id>/advance` (POST) — Staff button to advance the simulation
+   - On advance:
+     - Fetch Wave 1 alerts, simulate replies (seeded RNG per request)
+     - Update alert.reply for each
+     - Count confirmed donors
+     - If confirmed ≥ units_needed: Mark request as "fulfilled", log
+     - Else: Plan fresh wave (reuse eligible), fire Wave 2 (channel="simulator"), log
+   - Ensures reproducible testing: same request_id always produces same reply sequence
+
+5. **Privacy Enforcement**
+   - Donor phone numbers ONLY visible in staff view if alert.reply == "confirmed"
+   - Unconfirmed/declined donors' contact info never shown (prevents accidental staff leaks)
+   - Tests verify this constraint in template rendering
+
+6. **Mark Donated Flow**
+   - `/request/<id>/donor/<donor_id>/mark-donated` (POST) — Staff button
+   - On mark-donated:
+     - Verify alert.reply == "confirmed"
+     - Write donations row (request_id linked, source="simulator")
+     - Update alert.showed_up = true
+     - Log to audit_log
+   - Donors immediately re-assess eligibility (become deferred if needed)
+
+7. **Integration with App**
+   - Updated `/request/<id>` to show alerts and staff controls
+   - Added imports: `alerting`, `random`, `date`
+   - Request status page shows:
+     - Wave 1/Wave 2 donor lists (names, blood group, predicted score, reason)
+     - Activate button (visible if pending_verification, staff=1)
+     - Advance button (visible if active, staff=1)
+     - Mark donated button per confirmed donor
+
+### Test Coverage
+
+**17 new tests in `test_stage4.py`:**
+- `TestAlertingPlanner` (6 tests): Wave sizes, anti-spam, quiet hours, input validation
+- `TestReplySimulation` (2 tests): Score-based reply distributions
+- `TestActivationFlow` (2 tests): Activation writes Wave 1, changes status
+- `TestFulfillment` (2 tests): Enough confirmations → fulfilled; shortfall → Wave 2
+- `TestPrivacy` (2 tests): Phone visibility rule (confirmed only)
+- `TestMarkDonated` (3 tests): Donations row write, showed_up flag, deferred re-assessment
+
+**Backward Compatibility:**
+- All 56 previous tests (Stage 1-3) still passing
+- **Total: 73 tests passing**
+- No changes to eligibility/compatibility logic (Stages 1-2 remain intact)
+- Predictor interface unchanged (Stage 3 rank_donors still used)
+
+### Key Files Modified
+
+| File | Changes |
+|------|---------|
+| `app.py` | Added alerting import; 3 new routes (activate, advance, mark-donated) |
+| `alerting.py` | NEW: plan_waves(), determine_reply() |
+| `tests/test_stage4.py` | NEW: 17 comprehensive tests |
+| `BLOODBEACON_STATUS.md` | Added Stage 4 section |
+
+### Technical Decisions
+
+1. **Seeded RNG per request:** `random.Random(request_id)` ensures deterministic replies for the same request across multiple advance calls. Simplifies testing; real deployments can seed by (request_id, timestamp) for variation.
+
+2. **Quiet hours record but don't block:** Policy note aids auditing; simulator doesn't respect them (would confuse testing). Real SMS/WhatsApp integration (Stage 6) will honor them.
+
+3. **Donations row links to request:** `donations.request_id` enables audit trail and per-request fulfillment tracking.
+
+4. **No stored scores in alerts:** Predicted probability is computed fresh per ranking. If needed for later audit, could add `predicted_score` column to alerts table.
+
+### Assumptions & Future Enhancements
+
+- Single request in simulator at a time (UI doesn't prevent multiple active; tests assume one)
+- Wave 2 auto-fires on advance if shortfall (no user pause option yet)
+- Quiet hours affect audit/reporting but not simulator logic (Stage 6 will enforce)
+- Donor unavailability/decline reasons not stored beyond reply enum
+
+---
+
 **Last Updated:** 2024-11-10  
-**Stages Complete:** Stage 1 ✅, Stage 2 ✅, Stage 2.1 (Corrections) ✅, Stage 3 (Predictor) ✅
-**Total Tests:** 56 passing  
+**Stages Complete:** Stage 1 ✅, Stage 2 ✅, Stage 2.1 (Corrections) ✅, Stage 3 (Predictor) ✅, Stage 4 (Alerting) ✅
+**Total Tests:** 73 passing (18 Stage 1 + 27 Stage 2 + 11 Stage 3 + 17 Stage 4)
 **Commits:**
   - Stage 2: `eligibility + compatibility engines, match preview upgrade`
   - Stage 2.1: `plasma matrix correction + RBC table test`
-  - Stage 3: `donor response predictor` (coming)
+  - Stage 3: `donor response predictor`
+  - Stage 4: `wave alerting + simulator` (coming)

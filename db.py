@@ -5,6 +5,7 @@ All database interactions go through this interface.
 """
 
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -182,3 +183,40 @@ def get_alerts_for_donor(donor_id: int) -> list:
     except Exception:
         # Table may not exist yet in early stages
         return []
+
+# === ALERTS (Stage 4+) ===
+
+def insert_alert(request_id: int, donor_id: int, wave_no: int, channel: str) -> dict:
+    """Insert an alert for a donor. Returns the alert record."""
+    db = get_db()
+    result = db.table("alerts").insert({
+        "request_id": request_id,
+        "donor_id": donor_id,
+        "wave_no": wave_no,
+        "channel": channel,
+        "sent_at": datetime.now().isoformat(),
+    }).execute()
+    return result.data[0] if result.data else None
+
+def get_alerts_for_request(request_id: int) -> list:
+    """Get all alerts for a request."""
+    db = get_db()
+    result = db.table("alerts").select("*").eq("request_id", request_id).execute()
+    return result.data if result.data else []
+
+def update_alert_reply(alert_id: int, reply: str) -> dict:
+    """Update an alert with a donor's reply."""
+    db = get_db()
+    result = db.table("alerts").update({
+        "reply": reply,
+        "replied_at": datetime.now().isoformat(),
+    }).eq("id", alert_id).execute()
+    return result.data[0] if result.data else None
+
+def update_alert_showup(alert_id: int, showed_up: bool) -> dict:
+    """Mark an alert as showed_up (when donation recorded)."""
+    db = get_db()
+    result = db.table("alerts").update({
+        "showed_up": showed_up,
+    }).eq("id", alert_id).execute()
+    return result.data[0] if result.data else None
