@@ -1053,3 +1053,115 @@ Prove the WhatsApp outbound path: Wave 1 alerts written with channel="whatsapp",
   - Message dedupe
   - Reconnect on transient
   - No reconnect on loggedOut
+
+---
+
+## Stage 6.1.1: Staff UX Mini-Fix
+
+**Objective:** Replace blank 403 errors with friendly HTML, implement staff session persistence, verify approval flow end-to-end, and fix display formatting.
+
+**Status:** ✅ COMPLETE
+
+### What Was Built
+
+1. **Friendly 403 Error Pages**
+   - ✅ Created `templates/staff_required.html` with styled error message
+   - ✅ Message: "Staff access — add ?staff=1 to the address"
+   - ✅ All 9 staff-only routes now return friendly HTML instead of blank 403
+   - ✅ HTTP status remains 403 for proper semantics
+
+2. **Staff Session Persistence**
+   - ✅ Added `is_staff()` helper that checks both `?staff=1` flag AND session
+   - ✅ When `?staff=1` is passed, `session["staff"] = True` is set
+   - ✅ Subsequent requests can use session without flag
+   - ✅ All staff routes accept either method
+
+3. **Approval Flow (Verify/Reject)**
+   - ✅ Added Verify and Reject buttons to pending_verification requests
+   - ✅ Buttons render on `/request/<id>?staff=1` when status = pending_verification
+   - ✅ Forms POST to `/request/<id>/verify?staff=1` and `/request/<id>/reject?staff=1`
+   - ✅ Verify flips status to "verified" and creates audit entry
+   - ✅ Reject flips status to "rejected" and creates audit entry with reason
+   - ✅ Both require staff access (friendly 403 if missing)
+
+4. **Display Formatting**
+   - ✅ Added `human_date` Jinja2 filter: converts ISO dates/timestamps to "10 Nov 2026, 10:55 PM"
+   - ✅ Added `unit_int` Jinja2 filter: renders 2.0 as "2", not "2.0"
+   - ✅ Applied to request_status.html: "Needed By" and "Units" fields
+   - ✅ Handles both ISO date (2026-11-10) and ISO timestamp (2026-11-10T22:55:00Z) formats
+
+5. **Staff Links**
+   - ✅ Home page staff link carries `?staff=1`
+   - ✅ Staff dashboard "View Details" links carry `?staff=1`
+   - ✅ All staff links maintain flag through navigation
+
+### Test Coverage
+
+- **New Tests:** 20 comprehensive tests in `test_stage61_1_staff_ux.py`
+  - 3 tests for friendly 403 pages (staff dashboard, donors, activate)
+  - 1 test for session persistence
+  - 9 tests for approval flow (buttons, forms, status flip, audits, permission checks)
+  - 4 tests for date/unit formatting
+  - 2 tests for staff link flags
+  - 2 tests for backward compatibility
+
+- **All Previous Tests:** 114 tests still passing
+  - Total: **134 tests passing** (114 + 20 new)
+  - ✅ 100% backward compatibility maintained
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `templates/staff_required.html` | Friendly 403 error page with styled message |
+| `tests/test_stage61_1_staff_ux.py` | 20 new tests for staff UX improvements |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `app.py` | Added `session` import; added `human_date` and `unit_int` Jinja2 filters; added `is_staff()` and `require_staff()` helpers; updated all 9 staff-only routes to use `require_staff()` instead of blank 403 |
+| `templates/home.html` | Changed staff link from `/staff` to `/staff?staff=1` |
+| `templates/staff_dashboard.html` | Changed "View Details" link from `/request/<id>` to `/request/<id>?staff=1` |
+| `templates/request_status.html` | Added Verify/Reject forms for pending_verification; applied `human_date` filter to "Needed By"; applied `unit_int` filter to "Units" |
+
+### Design Decisions
+
+1. **Session Persistence Pattern:**
+   - Flag `?staff=1` sets session; future requests use session
+   - Simpler than re-passing flag through every link
+   - Flask's test client handles session correctly
+
+2. **Friendly 403 Reuses Base Template:**
+   - `staff_required.html` extends `base.html` for consistent styling
+   - Shows the path to add flag (e.g., `/staff?staff=1`)
+   - Users see an actual page, not an empty error
+
+3. **Approval Forms Inline:**
+   - Verify/Reject buttons on the same request_status page
+   - No separate modal/form page needed
+   - Forms submit with hidden staff_name; production would capture from session
+
+4. **Date Filter Handles Multiple Formats:**
+   - Handles ISO date (2026-11-10) → "10 Nov 2026"
+   - Handles ISO datetime (2026-11-10T22:55:00Z) → "10 Nov 2026, 10:55 PM"
+   - Returns empty string for None; returns original if parse fails
+   - Strips leading zeros from day (01 → 1)
+
+### Verified Behavior
+
+✅ Accessing `/staff` without flag returns 403 with friendly HTML, not blank  
+✅ Accessing `/staff?staff=1` shows dashboard (flag sets session)  
+✅ Pending requests show Verify and Reject buttons  
+✅ Verify flips status to verified + audit entry  
+✅ Reject flips status to rejected + audit entry  
+✅ POST without staff flag returns friendly 403  
+✅ Needed By renders as "10 Nov 2026, 10:55 PM", not "2026-11-10T22:55:00Z"  
+✅ Units renders as "2", not "2.0"  
+✅ Staff links carry ?staff=1  
+✅ All 134 tests passing; full backward compatibility
+
+### Next Steps
+
+Ready for deployment. All staff UX improvements complete and tested.
+
