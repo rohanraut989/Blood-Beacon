@@ -20,6 +20,7 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
 
 PORT = int(os.getenv("PORT", 5001))
+CASCADE_WINDOW_MINUTES = 2
 
 # === JINJA2 FILTERS ===
 
@@ -272,17 +273,141 @@ def _get_bridge_status():
         return {"label": "not connected", "error": str(error)}
 
 def _maybe_auto_advance(request_id):
+    _evaluate_cascade(request_id)
+
+
+def _cascade_window_minutes():
+    rule = db.get_rule("CASCADE_WINDOW_MINUTES")
+    if rule and rule.get("value") is not None:
+        try:
+            return max(float(rule["value"]), 0)
+        except (TypeError, ValueError):
+            pass
+    return CASCADE_WINDOW_MINUTES
+
+
+def _alert_sent_datetime(alert):
+    value = alert.get("sent_at") or alert.get("created_at")
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _cascade_send_alert(req, donor, channel, wave_no=1):
+    alert = db.insert_alert(
+        request_id=req["id"],
+        donor_id=donor["id"],
+        wave_no=wave_no,
+        channel=channel,
+        match_tier=donor.get("match_tier", 1),
+        cross_group=donor.get("cross_group", False),
+    )
+    if channel == "whatsapp":
+        _send_whatsapp_alert(donor, req)
+    return alert
+
+
+def _stand_down_active_alerts(req, alerts):
+    for alert in alerts:
+        if alert.get("stage") == "done" or alert.get("reply") is not None:
+            continue
+        donor = db.get_donor(alert["donor_id"])
+        db.update_alert_reply(alert["id"], "covered", stage="done")
+        if donor:
+            message = (
+                f"Good news, {_donor_first_name(donor)} — this request just got covered "
+                "by another donor. Thank you for being ready to help. 🙏"
+            )
+            if alert.get("channel") == "simulator":
+                db.insert_audit_log("simulator", "stand_down_sent", "alert", alert["id"], message)
+            else:
+                _send_whatsapp_message(donor["phone"], message)
+        db.insert_audit_log(
+            actor="system",
+            action="stand_down_sent",
+            entity="alert",
+            entity_id=alert["id"],
+            detail=f"Request {req['id']} was fulfilled",
+        )
+
+
+def _evaluate_cascade(request_id, channel=None):
+    """Sweep expired asks, refill free unit slots, and settle fulfilment."""
     req = db.get_request(request_id)
     if not req or req.get("status") != "active":
         return
+    now = datetime.now()
     alerts = db.get_alerts_for_request(request_id)
-    wave1 = [alert for alert in alerts if alert.get("wave_no") == 1]
-    wave2 = [alert for alert in alerts if alert.get("wave_no") == 2]
-    if wave1 and not wave2 and all(
-        alert.get("reply") is not None or alert.get("stage") == "done"
-        for alert in wave1
-    ):
-        advance_simulation(request_id, _internal=True)
+    window = _cascade_window_minutes()
+
+    for alert in alerts:
+        if alert.get("stage") == "done" or alert.get("reply") is not None:
+            continue
+        sent_at = _alert_sent_datetime(alert)
+        if sent_at and (now - sent_at).total_seconds() >= window * 60:
+            db.update_alert_reply(alert["id"], "passed", stage="done")
+            db.insert_audit_log(
+                actor="system",
+                action="cascade_passed",
+                entity="alert",
+                entity_id=alert["id"],
+                detail=f"Reply window expired after {window:g} minutes",
+            )
+
+    confirmed = _confirmed_count(request_id)
+    units = int(float(req.get("units", 0) or 0))
+    if confirmed >= units:
+        db.update_request_status(request_id, "fulfilled")
+        _stand_down_active_alerts(req, db.get_alerts_for_request(request_id))
+        db.insert_audit_log(
+            actor="system",
+            action="request_fulfilled",
+            entity="request",
+            entity_id=request_id,
+            detail=f"Cascade fulfilled with {confirmed} confirmations",
+        )
+        return
+
+    alerts = db.get_alerts_for_request(request_id)
+    active_count = sum(
+        1 for alert in alerts
+        if alert.get("stage") != "done" and alert.get("reply") is None
+    )
+    slots = max(units - confirmed - active_count, 0)
+    if not slots:
+        return
+
+    ranked, alerts_by_donor, _ = _ranked_match_pool(req)
+    asked_ids = {alert["donor_id"] for alert in alerts}
+    channel = channel or next(
+        (alert.get("channel") for alert in alerts if alert.get("channel")),
+        "whatsapp",
+    )
+    for donor, score, reason in ranked:
+        if slots <= 0:
+            break
+        if donor["id"] in asked_ids:
+            continue
+        plan = alerting.plan_waves(
+            [(donor, score, reason)], req, alerts_by_donor, now
+        )
+        if not plan["wave1"]:
+            continue
+        _cascade_send_alert(req, donor, channel)
+        asked_ids.add(donor["id"])
+        slots -= 1
+        db.insert_audit_log(
+            actor="system",
+            action="cascade_advanced",
+            entity="request",
+            entity_id=request_id,
+            detail=f"Asked donor {donor.get('name', donor['id'])}",
+        )
 
 
 @app.route("/request/<int:request_id>")
@@ -488,16 +613,8 @@ def activate_request(request_id, _internal=False):
             flash(f"Request cannot be activated (status: {req['status']}).", "error")
             return redirect(url_for("request_status", request_id=request_id, staff=1))
     
-    ranked_with_scores, alerts_by_donor, eligible_pool_count = _ranked_match_pool(req)
-    
-    # Convert to just donor dicts for planner
-    ranked_donors = [donor for donor, score, reason in ranked_with_scores]
-    
-    # Plan waves
-    now = datetime.now()
-    plan = alerting.plan_waves(ranked_with_scores, req, alerts_by_donor, now)
-    
     # Activate request
+    _, _, eligible_pool_count = _ranked_match_pool(req)
     db.update_request_match_pool_count(
         request_id,
         eligible_pool_count
@@ -506,51 +623,20 @@ def activate_request(request_id, _internal=False):
     
     # Determine channel (whatsapp for real requests, simulator for testing)
     channel = request.args.get("channel", "whatsapp")  # Default to whatsapp
-    
-    # Write Wave 1 alerts and send messages
-    wave1_donors = plan["wave1"]
-    for donor in wave1_donors:
-        db.insert_alert(
-            request_id=request_id,
-            donor_id=donor["id"],
-            wave_no=1,
-            channel=channel,
-            match_tier=donor.get("match_tier", 1),
-            cross_group=donor.get("cross_group", False),
-        )
-        
-        # If WhatsApp channel, send message via bridge
-        if channel == "whatsapp":
-            _send_whatsapp_alert(donor, req)
-    
-    # Write audit log
-    skip_counts = {}
-    for skipped in plan["skipped"]:
-        reason = skipped.get("reason", "unspecified reason")
-        skip_counts[reason] = skip_counts.get(reason, 0) + 1
-    skip_detail = ", ".join(
-        f"{count} skipped ({reason})" for reason, count in skip_counts.items()
-    )
-    if not skip_detail:
-        skip_detail = "0 skipped (no planner exclusions)"
-    tier_counts = {
-        tier: sum(1 for donor in wave1_donors if donor.get("match_tier", 1) == tier)
-        for tier in (1, 2, 3)
-    }
-    wave_detail = (
-        f"Wave 1: {tier_counts[1]} exact, {tier_counts[2]} compatible, "
-        f"{tier_counts[3]} far; {skip_detail}; "
-        f"Wave 2: {len(plan['wave2'])} queued"
-    )
+    _evaluate_cascade(request_id, channel=channel)
     db.insert_audit_log(
         actor="staff_simulator",
         action="activate_request",
         entity="request",
         entity_id=request_id,
-        detail=f"{wave_detail} on {channel}"
+        detail=f"Sequential cascade activated on {channel}"
     )
     
-    flash(f"Request activated! {len(wave1_donors)} donors alerted in Wave 1.", "success")
+    active_asks = sum(
+        1 for alert in db.get_alerts_for_request(request_id)
+        if alert.get("stage") != "done" and alert.get("reply") is None
+    )
+    flash(f"Request activated! {active_asks} donor(s) asked.", "success")
     return redirect(url_for("request_status", request_id=request_id, staff=1))
 
 
@@ -597,48 +683,6 @@ def _confirmed_count(request_id):
         1 for alert in db.get_alerts_for_request(request_id)
         if alert.get("reply") == "confirmed"
     )
-
-
-def _backfill_after_definitive_reply(request_obj, resolved_alert):
-    """Spend one definitive decline by alerting the next eligible donor."""
-    if request_obj.get("status") != "active":
-        return None
-    if _confirmed_count(request_obj["id"]) >= int(float(request_obj.get("units", 0) or 0)):
-        return None
-
-    ranked, alerts_by_donor, _ = _ranked_match_pool(request_obj)
-    alerts = db.get_alerts_for_request(request_obj["id"])
-    alerted_ids = {alert["donor_id"] for alert in alerts}
-    wave_no = resolved_alert.get("wave_no", 1)
-    channel = resolved_alert.get("channel", "whatsapp")
-
-    for donor, score, reason in ranked:
-        if donor["id"] in alerted_ids:
-            continue
-        plan = alerting.plan_waves(
-            [(donor, score, reason)], request_obj, alerts_by_donor, datetime.now()
-        )
-        if not plan["wave1"]:
-            continue
-        db.insert_alert(
-            request_id=request_obj["id"],
-            donor_id=donor["id"],
-            wave_no=wave_no,
-            channel=channel,
-            match_tier=donor.get("match_tier", 1),
-            cross_group=donor.get("cross_group", False),
-        )
-        if channel == "whatsapp":
-            _send_whatsapp_alert(donor, request_obj)
-        db.insert_audit_log(
-            actor="system",
-            action="backfill_alert",
-            entity="request",
-            entity_id=request_obj["id"],
-            detail=f"Wave {wave_no}: backfilled donor {donor.get('name', donor['id'])}",
-        )
-        return donor
-    return None
 
 
 def _patient_first_name(req):
@@ -780,6 +824,35 @@ _WHATSAPP_VERIFY_PROMPT = (
 
 # === STAGE 4 SIMULATOR ===
 
+def _advance_cascade_simulation(request_id):
+    req = db.get_request(request_id)
+    if not req or req.get("status") != "active":
+        return
+    _evaluate_cascade(request_id, channel="simulator")
+    seeded_rng = random.Random(request_id)
+    for alert in list(db.get_alerts_for_request(request_id)):
+        if alert.get("stage") == "done" or alert.get("reply") is not None:
+            continue
+        donor = db.get_donor(alert["donor_id"])
+        reply = alerting.determine_reply(donor, 0.5, seeded_rng)
+        if reply == "no_reply":
+            continue
+        if alert.get("stage") == "awaiting_recency":
+            if reply == "declined":
+                db.update_alert_reply(alert["id"], "donated_recently", stage="done")
+                db.insert_donation(
+                    donor_id=donor["id"], donated_on=date.today().isoformat(),
+                    units=1, source="self_report",
+                )
+                _send_conversation_close(donor, req, alert, "donated_recently")
+            else:
+                db.update_alert_stage(alert["id"], "awaiting_confirm")
+        else:
+            outcome = "confirmed" if reply == "confirmed" else "declined"
+            db.update_alert_reply(alert["id"], outcome, stage="done")
+            _send_conversation_close(donor, req, alert, outcome)
+    _evaluate_cascade(request_id, channel="simulator")
+
 @app.route("/request/<int:request_id>/advance", methods=["POST"])
 def advance_simulation(request_id, _internal=False):
     """Advance the simulator: process pending replies and fire Wave 2 if needed."""
@@ -796,6 +869,8 @@ def advance_simulation(request_id, _internal=False):
     if not req:
         flash("Request not found.", "error")
         return redirect(url_for("home"))
+    _advance_cascade_simulation(request_id)
+    return redirect(url_for("request_status", request_id=request_id, staff=1))
     
     # Get all alerts for this request
     alerts = db.get_alerts_for_request(request_id)
@@ -1082,6 +1157,10 @@ def staff_dashboard():
     """Standalone demo-grade staff console."""
     if not session.get("staff_console"):
         return render_template("staff_console.html", authenticated=False)
+    all_requests = db.get_all_requests()
+    for req in all_requests:
+        if req.get("status") == "active":
+            _evaluate_cascade(req["id"])
     all_requests = db.get_all_requests()
     
     requests_by_status = {
@@ -1386,19 +1465,42 @@ def whatsapp_reply():
                 break
         
         if not matching_alert:
-            # A late reply to a terminal request still receives one close.
+            # A passed donor may resume while the request is still open.
             for alert in all_alerts:
-                terminal_request = db.get_request(alert["request_id"])
-                if (
-                    terminal_request
-                    and terminal_request.get("status") in ("fulfilled", "closed")
-                    and not alert.get("close_sent")
-                ):
-                    _send_conversation_close(donor, terminal_request, alert, "late")
-                    return {"status": "late_reply_closed"}, 200
-            # No pending alert; ignore (idempotent)
-            print(f"WhatsApp reply matched no pending alert for sender {phone!r}")
-            return {"status": "no_pending_alert"}, 200
+                request_for_alert = db.get_request(alert["request_id"])
+                if alert.get("reply") == "passed" and request_for_alert:
+                    if request_for_alert.get("status") in ("fulfilled", "closed"):
+                        _send_conversation_close(donor, request_for_alert, alert, "late")
+                        return {"status": "late_reply_closed"}, 200
+                    if request_for_alert.get("status") == "active":
+                        db.update_alert_stage(alert["id"], "awaiting_recency")
+                        alert["stage"] = "awaiting_recency"
+                        alert["reply"] = None
+                        db.insert_audit_log(
+                            actor="system",
+                            action="donor_resumed",
+                            entity="alert",
+                            entity_id=alert["id"],
+                            detail=f"Late reply resumed donor {donor['id']}",
+                        )
+                        matching_alert = alert
+                        break
+            if matching_alert:
+                pass
+            else:
+                # A late reply to a terminal request still receives one close.
+                for alert in all_alerts:
+                    terminal_request = db.get_request(alert["request_id"])
+                    if (
+                        terminal_request
+                        and terminal_request.get("status") in ("fulfilled", "closed")
+                        and not alert.get("close_sent")
+                    ):
+                        _send_conversation_close(donor, terminal_request, alert, "late")
+                        return {"status": "late_reply_closed"}, 200
+                # No pending alert; ignore (idempotent)
+                print(f"WhatsApp reply matched no pending alert for sender {phone!r}")
+                return {"status": "no_pending_alert"}, 200
         
         # Process the reply
         request_obj = db.get_request(matching_alert["request_id"])
@@ -1430,14 +1532,15 @@ def whatsapp_reply():
                     units=1,
                     source="self_report"
                 )
-                _backfill_after_definitive_reply(request_obj, matching_alert)
                 _send_conversation_close(
                     donor, request_obj, matching_alert, "donated_recently"
                 )
+                _evaluate_cascade(request_obj["id"])
                 return {"status": "reply_recorded", "reply": "donated_recently"}, 200
             if text == "2":
                 db.update_alert_stage(matching_alert["id"], "awaiting_confirm", message_id=message_id)
                 _send_whatsapp_message(phone, _confirm_message(request_obj))
+                _evaluate_cascade(request_obj["id"])
                 return {"status": "awaiting_confirm"}, 200
             _send_whatsapp_message(
                 phone,
@@ -1472,7 +1575,7 @@ def whatsapp_reply():
                 _send_conversation_close(
                     donor, request_obj, matching_alert, "declined"
                 )
-                _backfill_after_definitive_reply(request_obj, matching_alert)
+        _evaluate_cascade(request_obj["id"])
         # Re-evaluate request: check if fulfilled
         confirmed_count = 0
         alerts_for_request = db.get_alerts_for_request(matching_alert["request_id"])
@@ -1490,14 +1593,6 @@ def whatsapp_reply():
                 detail=f"Fulfilled via WhatsApp after {confirmed_count} confirmations"
             )
             return {"status": "request_fulfilled"}, 200
-        
-        # Wave not exhausted, proceed with next wave if still needed
-        # (Fire Wave 2 if Wave 1 exhausted but not fulfilled)
-        wave1_alerts = [a for a in alerts_for_request if a["wave_no"] == 1]
-        wave2_alerts = [a for a in alerts_for_request if a["wave_no"] == 2]
-        
-        if len(wave2_alerts) == 0 and confirmed_count < request_obj.get("units", 1):
-            _maybe_auto_advance(matching_alert["request_id"])
         
         return {"status": "reply_recorded", "reply": processed_reply}, 200
     

@@ -240,7 +240,7 @@ def update_alert_reply(alert_id: int, reply: str, message_id: str = None, stage:
 def update_alert_stage(alert_id: int, stage: str, message_id: str = None) -> dict:
     """Advance an alert conversation without recording a final reply."""
     db = get_db()
-    update_data = {"stage": stage}
+    update_data = {"stage": stage, "sent_at": datetime.now().isoformat()}
     if message_id:
         update_data["message_id"] = message_id
     result = db.table("alerts").update(update_data).eq("id", alert_id).execute()

@@ -1292,8 +1292,13 @@ request display formatter also remains tolerant of full ISO timestamps.
 
 Public request submission now performs the existing verification and activation
 steps automatically, preserving the invariant that activation only accepts a
-verified request. Wave 2 is event-driven: it is evaluated after terminal donor
-replies and when the public status page is loaded; no scheduler is used.
+verified request. Donor matching uses a sequential cascade rather than
+parallel waves: only `units_needed - confirmed` donors are active at once,
+strictly in tier/predictor order. Each question has a configurable
+`CASCADE_WINDOW_MINUTES` rule (default 2); expiry records `passed` without a
+cooldown and immediately fills the freed slot. Cascade evaluation is
+event-driven on replies, public status/status.json loads, and staff-console
+loads; no scheduler is used.
 
 Staff monitoring is isolated behind `/staff` and a demo-grade `STAFF_PASSCODE`
 session gate. Public pages do not link to staff surfaces. Production deployment
@@ -1306,7 +1311,10 @@ claim. A later donor registration does not silently activate a zero-match
 request: staff can see it as an open active request and re-run activation from
 the operational console as the documented manual re-trigger step.
 
-Definitive donor declines now trigger one immediate same-wave backfill alert.
-The backfill re-runs live eligibility, monthly alert-cap, tier, and predictor
-ordering checks, and does not run for no-response expiry or closed/fulfilled
-requests.
+Definitive declines and donated-recently outcomes free a cascade slot and the
+same evaluator asks the next unused eligible donor. Late replies from passed
+donors resume while the request is open; fulfilled/closed requests receive the
+existing completed close. When fulfilment occurs, remaining active donors get a
+single stand-down message and `covered` outcome. Pool exhaustion leaves the
+request open with truthful `passed`/outcome accounting. The prior parallel-wave
+and standalone backfill behavior is superseded.

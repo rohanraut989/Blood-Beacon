@@ -2,6 +2,7 @@
 Mock database for testing (no live Supabase connection).
 Used by tests to verify logic without database credentials.
 """
+from datetime import datetime
 
 # In-memory test database
 _test_donors = {}
@@ -197,9 +198,10 @@ def insert_alert(request_id, donor_id, wave_no, channel, match_tier=1, cross_gro
         "channel": channel,
         "match_tier": match_tier,
         "cross_group": cross_group,
-        "sent_at": "2024-01-01T00:00:00Z",
+        "sent_at": datetime.now().isoformat(),
         "stage": "awaiting_recency",
         "reply": None,
+        "outcome": None,
         "message_id": None,
         "replied_at": None,
         "showed_up": None,
@@ -217,6 +219,7 @@ def update_alert_reply(alert_id, reply, message_id=None, stage="done"):
     """Update an alert with a donor's reply."""
     if alert_id in _test_alerts:
         _test_alerts[alert_id]["reply"] = reply
+        _test_alerts[alert_id]["outcome"] = reply
         _test_alerts[alert_id]["stage"] = stage
         _test_alerts[alert_id]["replied_at"] = "2024-01-01T00:00:00Z"
         if message_id:
@@ -228,6 +231,7 @@ def update_alert_stage(alert_id, stage, message_id=None):
     """Advance an alert conversation without recording a final reply."""
     if alert_id in _test_alerts:
         _test_alerts[alert_id]["stage"] = stage
+        _test_alerts[alert_id]["sent_at"] = datetime.now().isoformat()
         if message_id:
             _test_alerts[alert_id]["message_id"] = message_id
         return _test_alerts[alert_id]

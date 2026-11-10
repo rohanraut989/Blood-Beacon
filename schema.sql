@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS alerts (
   match_tier INT NOT NULL DEFAULT 1 CHECK (match_tier IN (1, 2, 3)),
   cross_group BOOLEAN NOT NULL DEFAULT FALSE,
   stage TEXT NOT NULL DEFAULT 'awaiting_recency' CHECK (stage IN ('awaiting_recency', 'awaiting_confirm', 'done')),
-  reply TEXT CHECK (reply IN ('confirmed', 'donated_recently', 'declined', 'no_reply')),
+  reply TEXT CHECK (reply IN ('confirmed', 'donated_recently', 'declined', 'no_reply', 'passed', 'covered')),
   message_id TEXT,
   replied_at TIMESTAMP WITH TIME ZONE,
   showed_up BOOLEAN,
@@ -86,6 +86,10 @@ CREATE TABLE IF NOT EXISTS rules (
   description TEXT,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+INSERT INTO rules (key, value, description)
+VALUES ('CASCADE_WINDOW_MINUTES', '2', 'Minutes allowed for each donor conversation question')
+ON CONFLICT (key) DO NOTHING;
 
 -- audit_log table
 CREATE TABLE IF NOT EXISTS audit_log (
