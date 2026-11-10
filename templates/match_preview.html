@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Donor Match Preview - BloodBeacon{% endblock %}
+
+{% block content %}
+<h1>Donor Match Preview</h1>
+
+<div style="background: #e7f3ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #667eea;">
+    <strong style="color: #004085;">⚠️ Stage 1 Preview</strong>
+    <p style="font-size: 13px; color: #004085; margin-top: 5px;">
+        This is a <strong>basic exact-match preview</strong> showing donors with {{ request.blood_group }} blood 
+        in {{ request.city }}. <strong>Eligibility checks and blood-type compatibility will be added in Stage 2.</strong>
+    </p>
+</div>
+
+<div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+    <h3 style="color: #333; margin-bottom: 10px;">Request Details</h3>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; font-size: 14px;">
+        <div>
+            <strong style="color: #666;">Patient:</strong>
+            <span style="color: #333;">{{ request.patient_name }}</span>
+        </div>
+        <div>
+            <strong style="color: #666;">Blood Group:</strong>
+            <span style="color: #333;">{{ request.blood_group }}</span>
+        </div>
+        <div>
+            <strong style="color: #666;">Hospital:</strong>
+            <span style="color: #333;">{{ request.hospital_name }}</span>
+        </div>
+        <div>
+            <strong style="color: #666;">City:</strong>
+            <span style="color: #333;">{{ request.city }}</span>
+        </div>
+    </div>
+</div>
+
+<h3 style="color: #333; margin-bottom: 15px;">Matching Donors ({{ donors|length }})</h3>
+
+{% if donors %}
+    <div style="display: grid; gap: 12px;">
+        {% for donor in donors %}
+            <div style="
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                padding: 15px;
+                background: white;
+                transition: box-shadow 0.2s;
+            " onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'" 
+               onmouseout="this.style.boxShadow='none'">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; font-size: 14px;">
+                    <div>
+                        <strong style="color: #333;">{{ donor.name }}</strong>
+                        <p style="color: #666; font-size: 12px; margin-top: 3px;">
+                            {{ donor.area }}, {{ donor.city }}
+                        </p>
+                    </div>
+                    <div>
+                        <span style="
+                            display: inline-block;
+                            padding: 6px 12px;
+                            background: #667eea;
+                            color: white;
+                            border-radius: 4px;
+                            font-weight: 600;
+                            font-size: 13px;
+                        ">{{ donor.blood_group }}</span>
+                    </div>
+                </div>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; font-size: 13px; color: #666;">
+                    <strong>Gender:</strong> {{ donor.gender }} | 
+                    <strong>Weight:</strong> {{ donor.weight_kg }} kg
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="alert warning">
+        No donors with {{ request.blood_group }} blood group found in {{ request.city }}.
+    </div>
+{% endif %}
+
+<div class="link-group" style="margin-top: 30px;">
+    <a href="/request/{{ request.id }}">← Back to Request Status</a>
+    <a href="/">Home</a>
+</div>
+{% endblock %}

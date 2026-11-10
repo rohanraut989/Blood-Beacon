@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Request Blood - BloodBeacon{% endblock %}
+
+{% block content %}
+<h1>Request Blood</h1>
+<p class="subtitle">Submit an urgent blood request. We'll verify and activate the search.</p>
+
+<form method="POST">
+    <div class="form-group">
+        <label for="patient_name">Patient Name *</label>
+        <input type="text" id="patient_name" name="patient_name" required>
+    </div>
+
+    <div class="form-group">
+        <label for="blood_group">Blood Group Needed *</label>
+        <select id="blood_group" name="blood_group" required>
+            <option value="">Select</option>
+            <option value="O+">O+</option>
+            <option value="O-">O-</option>
+            <option value="A+">A+</option>
+            <option value="A-">A-</option>
+            <option value="B+">B+</option>
+            <option value="B-">B-</option>
+            <option value="AB+">AB+</option>
+            <option value="AB-">AB-</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="component">Component Type</label>
+        <select id="component" name="component">
+            <option value="whole_blood">Whole Blood</option>
+            <option value="platelets">Platelets</option>
+            <option value="plasma">Plasma</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="units">Units Needed *</label>
+        <input type="number" id="units" name="units" step="0.5" min="0.5" value="1" required>
+    </div>
+
+    <div class="form-group">
+        <label for="hospital_name">Hospital Name *</label>
+        <input type="text" id="hospital_name" name="hospital_name" required>
+    </div>
+
+    <div class="form-group">
+        <label for="city">City *</label>
+        <input type="text" id="city" name="city" placeholder="e.g., Tiruchirappalli" required>
+    </div>
+
+    <div class="form-group">
+        <label for="needed_by">Needed By (Date & Time) *</label>
+        <input type="datetime-local" id="needed_by" name="needed_by" required>
+    </div>
+
+    <div class="form-group">
+        <label for="contact_phone">Contact Phone Number *</label>
+        <input type="tel" id="contact_phone" name="contact_phone" placeholder="Hospital contact" required>
+    </div>
+
+    <button type="submit" class="btn">Submit Request</button>
+</form>
+
+<div class="link-group">
+    <a href="/">← Back to Home</a>
+</div>
+{% endblock %}

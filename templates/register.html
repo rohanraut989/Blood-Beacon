@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Register as Donor - BloodBeacon{% endblock %}
+
+{% block content %}
+<h1>Register as a Donor</h1>
+<p class="subtitle">Help save lives. Register once, stay ready.</p>
+
+<form method="POST">
+    <div class="form-group">
+        <label for="name">Full Name *</label>
+        <input type="text" id="name" name="name" required>
+    </div>
+
+    <div class="form-group">
+        <label for="blood_group">Blood Group *</label>
+        <select id="blood_group" name="blood_group" required>
+            <option value="">Select your blood group</option>
+            <option value="O+">O+</option>
+            <option value="O-">O-</option>
+            <option value="A+">A+</option>
+            <option value="A-">A-</option>
+            <option value="B+">B+</option>
+            <option value="B-">B-</option>
+            <option value="AB+">AB+</option>
+            <option value="AB-">AB-</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="city">City *</label>
+        <input type="text" id="city" name="city" placeholder="e.g., Tiruchirappalli" required>
+    </div>
+
+    <div class="form-group">
+        <label for="area">Area / Locality</label>
+        <input type="text" id="area" name="area" placeholder="e.g., Cantonment">
+    </div>
+
+    <div class="form-group">
+        <label for="phone">Phone Number *</label>
+        <input type="tel" id="phone" name="phone" placeholder="10-digit mobile number" required>
+    </div>
+
+    <div class="form-group">
+        <label for="gender">Gender *</label>
+        <select id="gender" name="gender" required>
+            <option value="">Select</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+            <option value="Other">Other</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="date_of_birth">Date of Birth *</label>
+        <input type="date" id="date_of_birth" name="date_of_birth" required>
+    </div>
+
+    <div class="form-group">
+        <label for="weight_kg">Weight (kg) *</label>
+        <input type="number" id="weight_kg" name="weight_kg" step="0.1" min="0" required>
+    </div>
+
+    <button type="submit" class="btn">Register</button>
+</form>
+
+<div class="link-group">
+    <a href="/">← Back to Home</a>
+</div>
+{% endblock %}

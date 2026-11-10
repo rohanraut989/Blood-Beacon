@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}BloodBeacon - Emergency Blood Donor Activation{% endblock %}
+
+{% block content %}
+<div style="text-align: center;">
+    <h1>🩸 BloodBeacon</h1>
+    <p class="subtitle">Emergency Blood-Donor Activation System</p>
+    
+    <p style="color: #666; font-size: 15px; line-height: 1.6; margin-bottom: 30px;">
+        BloodBeacon finds eligible blood donors nearby when a hospital needs blood urgently.
+        We use AI to predict who's most likely to help, alert them on WhatsApp in smart waves,
+        and confirm donations in real time.
+    </p>
+
+    <div class="doors">
+        <a href="/register" class="door">
+            <h3>🎯 Register</h3>
+            <p>Become a donor</p>
+        </a>
+        <a href="/request" class="door">
+            <h3>🆘 Request</h3>
+            <p>Need blood?</p>
+        </a>
+        <a href="/staff" class="door">
+            <h3>👨‍💼 Staff</h3>
+            <p>Verify & monitor</p>
+        </a>
+    </div>
+</div>
+{% endblock %}
