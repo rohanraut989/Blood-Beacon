@@ -1267,6 +1267,14 @@ fallback for stable WhatsApp `@lid` identities that expose no alternate phone
 field. Every outbound `/send` also logs the complete `onWhatsApp(phone)` result
 so newly returned LIDs are visible for diagnosis and automatic learning.
 
+## Receiver Details on Confirmation
+
+When a donor confirms at Step 2, the state transition sends exactly one
+best-effort WhatsApp message containing the donor-facing receiver details and
+human-readable needed-by date. A bridge failure leaves the confirmation intact
+and records `receiver_details_send_failed`; simulator confirmations record the
+same would-be message in the simulator audit log instead of calling WhatsApp.
+
 ## Supabase Timestamp Parsing
 
 Supabase `timestamptz` values are accepted by the shared `utils.parse_date`

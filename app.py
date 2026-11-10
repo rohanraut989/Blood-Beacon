@@ -495,6 +495,15 @@ def _confirm_message(req):
         f"to donate? Reply 1 = Yes, I can come, 2 = Not this time"
     )
 
+def _receiver_details_message(donor, req):
+    return (
+        f"✅ Thank you, {donor.get('name', '').split()[0]}! You're confirmed to donate "
+        f"{req.get('blood_group')} blood for {req.get('patient_name')} at "
+        f"{req.get('hospital_name')}, {req.get('city')}. Receiver contact: "
+        f"{req.get('patient_name')} — {req.get('contact_phone')}. Please call them "
+        f"to coordinate. Needed by: {format_human_date(req.get('needed_by'))}."
+    )
+
 def _send_whatsapp_message(phone, message):
     """Send one donor-facing WhatsApp message through the bridge."""
     try:
@@ -575,6 +584,14 @@ def advance_simulation(request_id):
             if reply in ("confirmed", "declined"):
                 db.update_alert_reply(alert["id"], reply, stage="done")
                 if reply == "confirmed":
+                    receiver_details = _receiver_details_message(donor, req)
+                    db.insert_audit_log(
+                        actor="simulator",
+                        action="receiver_details_message",
+                        entity="alert",
+                        entity_id=alert["id"],
+                        detail=receiver_details
+                    )
                     confirmed_count += 1
     
     # Check if fulfilled
@@ -1126,6 +1143,24 @@ def whatsapp_reply():
                 message_id=message_id, stage="done"
             )
             db.update_alert_showup(matching_alert["id"], processed_reply == "confirmed")
+            if processed_reply == "confirmed":
+                receiver_details = _receiver_details_message(donor, request_obj)
+                if matching_alert.get("channel") == "simulator":
+                    db.insert_audit_log(
+                        actor="simulator",
+                        action="receiver_details_message",
+                        entity="alert",
+                        entity_id=matching_alert["id"],
+                        detail=receiver_details
+                    )
+                elif not _send_whatsapp_message(donor["phone"], receiver_details):
+                    db.insert_audit_log(
+                        actor="whatsapp_system",
+                        action="receiver_details_send_failed",
+                        entity="alert",
+                        entity_id=matching_alert["id"],
+                        detail=receiver_details
+                    )
 
         # Re-evaluate request: check if fulfilled
         confirmed_count = 0

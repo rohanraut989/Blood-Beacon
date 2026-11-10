@@ -430,6 +430,12 @@ class TestWhatsAppWave2:
         assert saved_alert["reply"] == "confirmed"
         assert saved_alert["stage"] == "done"
         assert mock_db.get_request(req["id"])["status"] == "fulfilled"
+        simulator_messages = [
+            entry for entry in mock_db.get_audit_log()
+            if entry["action"] == "receiver_details_message"
+        ]
+        assert len(simulator_messages) == 1
+        assert "Receiver contact: Patient — +977-1-555555." in simulator_messages[0]["detail"]
 
 class TestBridgeStatus:
     """Tests for bridge status display."""

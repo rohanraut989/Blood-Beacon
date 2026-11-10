@@ -141,6 +141,66 @@ class TestWhatsAppReplyEndpoint:
             "Can you come to Test Hospital to donate?" in call.kwargs["json"]["message"]
             for call in mock_post.call_args_list
         )
+        details_calls = [
+            call for call in mock_post.call_args_list
+            if "Receiver contact: Patient — +977-1-555555." in call.kwargs["json"]["message"]
+        ]
+        assert len(details_calls) == 1
+        assert details_calls[0].kwargs["json"]["message"] == (
+            "✅ Thank you, Test! You're confirmed to donate O+ blood for Patient at "
+            "Test Hospital, Kathmandu. Receiver contact: Patient — +977-1-555555. "
+            "Please call them to coordinate. Needed by: 20 Nov 2024."
+        )
+
+        duplicate = client.post(
+            "/internal/whatsapp-reply",
+            json={"phone": "+977-1-123456", "text": "1", "message_id": "msg_1c"},
+            headers={"X-Bridge-Secret": "test-secret-12345"}
+        )
+        assert duplicate.get_json()["status"] == "no_pending_alert"
+        assert len([
+            call for call in mock_post.call_args_list
+            if "Receiver contact: Patient — +977-1-555555." in call.kwargs["json"]["message"]
+        ]) == 1
+
+    @patch("app.requests.post")
+    def test_confirmation_details_failure_keeps_confirmed_and_audits(self, mock_post, client):
+        mock_post.return_value = MagicMock(status_code=200)
+        donor = mock_db.insert_donor(
+            name="Failure Donor", blood_group="O+", city="Kathmandu", area="Thamel",
+            phone="+977-1-123457", gender="M", date_of_birth="1990-01-01", weight_kg=70
+        )
+        req = mock_db.insert_request(
+            patient_name="Failure Patient", blood_group="O+", component="whole_blood",
+            units=2, hospital_name="Test Hospital", city="Kathmandu",
+            needed_by="2026-11-20", contact_phone="+977-1-555556", created_by="staff"
+        )
+        mock_db.verify_request(req["id"], "staff")
+        mock_db.update_request_status(req["id"], "active")
+        alert = mock_db.insert_alert(req["id"], donor["id"], 1, "whatsapp")
+        mock_post.side_effect = [
+            MagicMock(status_code=200),
+            MagicMock(status_code=503),
+        ]
+
+        client.post(
+            "/internal/whatsapp-reply",
+            json={"phone": donor["phone"], "text": "2", "message_id": "fail-2"},
+            headers={"X-Bridge-Secret": "test-secret-12345"}
+        )
+        response = client.post(
+            "/internal/whatsapp-reply",
+            json={"phone": donor["phone"], "text": "1", "message_id": "fail-1"},
+            headers={"X-Bridge-Secret": "test-secret-12345"}
+        )
+
+        assert response.status_code == 200
+        assert mock_db.get_alerts_for_request(req["id"])[0]["reply"] == "confirmed"
+        failures = [
+            entry for entry in mock_db.get_audit_log()
+            if entry["action"] == "receiver_details_send_failed"
+        ]
+        assert len(failures) == 1
     
     @patch("app.requests.post")
     def test_reply_donated_recently_inserts_donation(self, mock_post, client):
