@@ -1250,6 +1250,15 @@ The bridge also consults Baileys' LID mapping store and a persisted
 replies. If no mapping is available, the full inbound message key is logged
 before forwarding the raw JID.
 
+## Staff Wave Outcomes and Bridge Status
+
+Activation audit details now aggregate the planner's existing skip reasons and
+the staff request page shows the sent/queued/skipped wave outcome, including an
+explicit reason when no donors are sent. Staff bridge status checks the
+authenticated bridge `/status` endpoint with the shared secret and displays a
+brief error when that check fails, rather than reporting an unqualified
+connection state.
+
 ## Supabase Timestamp Parsing
 
 Supabase `timestamptz` values are accepted by the shared `utils.parse_date`

@@ -129,6 +129,44 @@ class TestWhatsAppActivation:
 
         assert response.status_code == 200
         assert mock_db.get_request(req["id"])["status"] == "active"
+
+    @patch("app.requests.get")
+    @patch("app.requests.post")
+    def test_activation_page_shows_wave_skip_reasons(self, mock_post, mock_get, client):
+        eligible = mock_db.insert_donor(
+            name="Eligible", blood_group="O+", city="Kathmandu", area="Thamel",
+            phone="9779817612700", gender="M", date_of_birth="1990-01-01",
+            weight_kg=70
+        )
+        capped = mock_db.insert_donor(
+            name="Capped", blood_group="O+", city="Kathmandu", area="Thamel",
+            phone="9779817612701", gender="M", date_of_birth="1990-01-01",
+            weight_kg=70
+        )
+        for _ in range(4):
+            alert = mock_db.insert_alert(99, capped["id"], 1, "whatsapp")
+            mock_db._test_alerts[alert["id"]]["created_at"] = "2026-11-10T00:00:00.000000+00:00"
+        req = mock_db.insert_request(
+            patient_name="Wave Patient", blood_group="O+", component="whole_blood",
+            units=1, hospital_name="Test Hospital", city="Kathmandu",
+            needed_by="2026-11-20", contact_phone="9779817612000",
+            created_by="staff_test"
+        )
+        mock_db.verify_request(req["id"], "staff_test")
+        mock_post.return_value = MagicMock(status_code=200)
+        status_response = MagicMock(status_code=200)
+        status_response.json.return_value = {"connected": True}
+        mock_get.return_value = status_response
+
+        response = client.post(
+            f"/request/{req['id']}/activate?staff=1&channel=whatsapp",
+            follow_redirects=True
+        )
+
+        assert response.status_code == 200
+        html = response.data.decode()
+        assert "Wave 1: 1 sent" in html
+        assert "1 skipped (monthly cap)" in html
     
     @patch('app.requests.post')
     def test_activation_creates_whatsapp_alerts(self, mock_post, client):
@@ -446,6 +484,7 @@ class TestBridgeStatus:
         html = response.data.decode()
         assert "WhatsApp Bridge" in html
         assert "Connected" in html or "connected" in html.lower()
+        assert mock_get.call_args.kwargs["headers"]["X-Bridge-Secret"] == "test-secret-12345"
     
     @patch('app.requests.get')
     def test_bridge_status_degraded_when_down(self, mock_get, client):
@@ -493,6 +532,7 @@ class TestBridgeStatus:
         html = response.data.decode()
         assert "WhatsApp Bridge" in html
         assert "Not Connected" in html or "not connected" in html.lower()
+        assert "Connection refused" in html
     
     def test_bridge_status_not_shown_in_public_view(self, client):
         """Bridge status should NOT be shown in public (non-staff) view."""

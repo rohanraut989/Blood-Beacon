@@ -178,6 +178,13 @@ def insert_audit_log(actor: str, action: str, entity: str, entity_id: int = None
     }).execute()
     return result.data[0] if result.data else None
 
+def get_audit_logs_for_entity(entity: str, entity_id: int) -> list:
+    """Get audit entries for a specific entity, newest first."""
+    result = get_db().table("audit_log").select("*").eq("entity", entity).eq(
+        "entity_id", entity_id
+    ).order("created_at", desc=True).execute()
+    return result.data if result.data else []
+
 # === ALERTS (Stage 3+) ===
 
 def get_alerts_for_donor(donor_id: int) -> list:

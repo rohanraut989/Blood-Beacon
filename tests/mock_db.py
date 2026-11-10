@@ -162,6 +162,12 @@ def get_audit_log():
     """Get all audit log entries."""
     return list(_test_audit_log.values())
 
+def get_audit_logs_for_entity(entity, entity_id):
+    return [
+        entry for entry in _test_audit_log.values()
+        if entry["entity"] == entity and entry["entity_id"] == entity_id
+    ][::-1]
+
 # === ALERTS (Stage 3+) ===
 
 def get_alerts_for_donor(donor_id):

@@ -115,7 +115,11 @@ export async function createBridgeAPI({ socket, bridgeSecret = '', stateStore, p
 
     if (req.method === 'GET' && req.url === '/status') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ connected: !!socket }));
+      res.end(JSON.stringify({
+        connected: !!socket,
+        status: socket ? 'connected' : 'not connected',
+        ...(socket ? {} : { error: 'WhatsApp socket is not connected' }),
+      }));
       return;
     }
 

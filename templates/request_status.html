@@ -109,9 +109,10 @@
     {% if bridge_status %}
         <div style="margin-top: 15px; padding: 12px; background: #f8f9fa; border-radius: 4px; font-size: 13px;">
             <strong>WhatsApp Bridge:</strong>
-            <span style="{% if bridge_status == 'connected' %}color: #28a745;{% else %}color: #dc3545;{% endif %}">
-                {{ bridge_status|replace('_', ' ')|title }}
+            <span style="{% if bridge_status.label == 'connected' %}color: #28a745;{% else %}color: #dc3545;{% endif %}">
+                {{ bridge_status.label|replace('_', ' ')|title }}
             </span>
+            {% if bridge_status.error %}<small>({{ bridge_status.error }})</small>{% endif %}
         </div>
     {% endif %}
     <form method="POST" action="/request/{{ request.id }}/activate?staff=1&channel=whatsapp" style="margin-top: 15px;">
@@ -125,15 +126,21 @@
     {% if bridge_status %}
         <div style="margin-top: 15px; padding: 12px; background: #f8f9fa; border-radius: 4px; font-size: 13px;">
             <strong>WhatsApp Bridge:</strong>
-            <span style="{% if bridge_status == 'connected' %}color: #28a745;{% else %}color: #dc3545;{% endif %}">
-                {{ bridge_status|replace('_', ' ')|title }}
+            <span style="{% if bridge_status.label == 'connected' %}color: #28a745;{% else %}color: #dc3545;{% endif %}">
+                {{ bridge_status.label|replace('_', ' ')|title }}
             </span>
+            {% if bridge_status.error %}<small>({{ bridge_status.error }})</small>{% endif %}
         </div>
     {% endif %}
     <a href="/match/{{ request.id }}" class="btn" style="background: #0c5460; margin-top: 15px;">View Donor Matches</a>
     <div style="margin-top: 15px;">
         <strong>Wave status:</strong> {{ alerts|length }} alert{{ '' if alerts|length == 1 else 's' }} sent
     </div>
+    {% if wave_outcome %}
+        <div class="alert" style="margin-top: 15px;">
+            {{ wave_outcome }}
+        </div>
+    {% endif %}
     <form method="POST" action="/request/{{ request.id }}/advance?staff=1" style="margin-top: 15px;">
         <button type="submit" class="btn">Advance Wave</button>
     </form>

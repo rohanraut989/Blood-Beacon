@@ -203,16 +203,25 @@ def request_blood():
 # === REQUEST STATUS ===
 
 def _get_bridge_status():
-    """Check WhatsApp bridge connection status."""
+    """Check the authenticated WhatsApp bridge status."""
     try:
         bridge_url = os.getenv("BRIDGE_URL", "http://127.0.0.1:3100")
-        response = requests.get(f"{bridge_url}/status", timeout=5)
+        bridge_secret = os.getenv("BRIDGE_SECRET", "")
+        response = requests.get(
+            f"{bridge_url}/status",
+            headers={"X-Bridge-Secret": bridge_secret},
+            timeout=5,
+        )
         if response.status_code == 200:
             data = response.json()
-            return data.get("status", "unknown")
-        return "not connected"
-    except Exception:
-        return "not connected"
+            connected = data.get("connected", data.get("status") == "connected")
+            return {
+                "label": "connected" if connected else "not connected",
+                "error": None if connected else data.get("error", "bridge is not connected"),
+            }
+        return {"label": "not connected", "error": f"bridge status HTTP {response.status_code}"}
+    except Exception as error:
+        return {"label": "not connected", "error": str(error)}
 
 
 @app.route("/request/<int:request_id>")
@@ -240,6 +249,15 @@ def request_status(request_id):
         alert_with_donor = dict(alert)
         alert_with_donor["donor"] = donor
         alert_details.append(alert_with_donor)
+
+    wave_outcome = None
+    if staff_mode:
+        audit_logs = db.get_audit_logs_for_entity("request", request_id)
+        activation = next(
+            (entry for entry in audit_logs if entry.get("action") == "activate_request"),
+            None,
+        )
+        wave_outcome = activation.get("detail") if activation else None
     
     # Get bridge status for staff view
     bridge_status = _get_bridge_status() if staff_mode else None
@@ -249,7 +267,8 @@ def request_status(request_id):
         request=req,
         is_staff=staff_mode,
         alerts=alert_details,
-        bridge_status=bridge_status
+        bridge_status=bridge_status,
+        wave_outcome=wave_outcome,
     )
 
 # === STAGE 5 VERIFICATION WORKFLOW ===
@@ -434,12 +453,25 @@ def activate_request(request_id):
             _send_whatsapp_alert(donor, req)
     
     # Write audit log
+    skip_counts = {}
+    for skipped in plan["skipped"]:
+        reason = skipped.get("reason", "unspecified reason")
+        skip_counts[reason] = skip_counts.get(reason, 0) + 1
+    skip_detail = ", ".join(
+        f"{count} skipped ({reason})" for reason, count in skip_counts.items()
+    )
+    if not skip_detail:
+        skip_detail = "0 skipped (no planner exclusions)"
+    wave_detail = (
+        f"Wave 1: {len(wave1_donors)} sent, {skip_detail}; "
+        f"Wave 2: {len(plan['wave2'])} queued"
+    )
     db.insert_audit_log(
         actor="staff_simulator",
         action="activate_request",
         entity="request",
         entity_id=request_id,
-        detail=f"Activated with Wave 1: {len(wave1_donors)} donors on {channel}, Wave 2: {len(plan['wave2'])} donors queued"
+        detail=f"{wave_detail} on {channel}"
     )
     
     flash(f"Request activated! {len(wave1_donors)} donors alerted in Wave 1.", "success")
