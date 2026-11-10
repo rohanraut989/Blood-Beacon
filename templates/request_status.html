@@ -64,12 +64,22 @@
 {% if request.status == 'pending_verification' %}
     <div class="alert warning">Your request is being prepared. Donors will be alerted shortly.</div>
 {% elif request.status == 'active' %}
+    {% if alerts|length == 0 and request.match_pool_count == 0 %}
+    <div class="alert warning">
+        No matching donors found near {{ request.city }} right now. Your request is open:
+        we will alert new matching donors as they register, and you can also try the
+        nearest blood bank.
+    </div>
+    {% else %}
     <div class="alert" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb;">
         Your request is live — donors are being alerted.
     </div>
     <div style="margin-top: 15px;">
-        <strong>Donor alerts:</strong> {{ alerts|length }}
+        <strong>Wave 1:</strong> {{ tier_counts.exact }} exact,
+        {{ tier_counts.compatible }} compatible,
+        {{ tier_counts.far }} far
     </div>
+    {% endif %}
     <form method="POST" action="/request/{{ request.id }}/fulfill" style="margin-top: 15px;">
         <button type="submit" class="btn">Mark as fulfilled</button>
     </form>

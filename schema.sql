@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS requests (
   status TEXT NOT NULL DEFAULT 'pending_verification' CHECK (status IN ('pending_verification', 'verified', 'active', 'fulfilled', 'closed', 'rejected')),
   created_by TEXT NOT NULL CHECK (created_by IN ('public', 'staff')),
   verified_by TEXT,
+  match_pool_count INT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -62,6 +63,8 @@ CREATE TABLE IF NOT EXISTS alerts (
   wave_no INT NOT NULL,
   sent_at TIMESTAMP WITH TIME ZONE,
   channel TEXT NOT NULL CHECK (channel IN ('whatsapp', 'simulator')),
+  match_tier INT NOT NULL DEFAULT 1 CHECK (match_tier IN (1, 2, 3)),
+  cross_group BOOLEAN NOT NULL DEFAULT FALSE,
   stage TEXT NOT NULL DEFAULT 'awaiting_recency' CHECK (stage IN ('awaiting_recency', 'awaiting_confirm', 'done')),
   reply TEXT CHECK (reply IN ('confirmed', 'donated_recently', 'declined', 'no_reply')),
   message_id TEXT,

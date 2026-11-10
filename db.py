@@ -203,7 +203,8 @@ def get_alerts_for_donor(donor_id: int) -> list:
 
 # === ALERTS (Stage 4+) ===
 
-def insert_alert(request_id: int, donor_id: int, wave_no: int, channel: str) -> dict:
+def insert_alert(request_id: int, donor_id: int, wave_no: int, channel: str,
+                 match_tier: int = 1, cross_group: bool = False) -> dict:
     """Insert an alert for a donor. Returns the alert record."""
     db = get_db()
     result = db.table("alerts").insert({
@@ -211,6 +212,8 @@ def insert_alert(request_id: int, donor_id: int, wave_no: int, channel: str) -> 
         "donor_id": donor_id,
         "wave_no": wave_no,
         "channel": channel,
+        "match_tier": match_tier,
+        "cross_group": cross_group,
         "sent_at": datetime.now().isoformat(),
     }).execute()
     return result.data[0] if result.data else None
@@ -267,6 +270,12 @@ def update_request_status(request_id: int, new_status: str, verified_by: str = N
     if verified_by:
         update_data["verified_by"] = verified_by
     result = db.table("requests").update(update_data).eq("id", request_id).execute()
+    return result.data[0] if result.data else None
+
+def update_request_match_pool_count(request_id: int, count: int) -> dict:
+    result = get_db().table("requests").update({
+        "match_pool_count": count,
+    }).eq("id", request_id).execute()
     return result.data[0] if result.data else None
 
 def verify_request(request_id: int, staff_name: str) -> dict:

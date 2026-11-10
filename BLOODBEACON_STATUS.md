@@ -1298,3 +1298,10 @@ replies and when the public status page is loaded; no scheduler is used.
 Staff monitoring is isolated behind `/staff` and a demo-grade `STAFF_PASSCODE`
 session gate. Public pages do not link to staff surfaces. Production deployment
 must replace this passcode with real staff accounts and authorization.
+
+Matching uses an ordered exact/same-city, compatible/same-city, and compatible/
+other-city ladder. If no eligible donor exists, the request remains active and
+the receiver sees an explicit zero-match message rather than a false alert
+claim. A later donor registration does not silently activate a zero-match
+request: staff can see it as an open active request and re-run activation from
+the operational console as the documented manual re-trigger step.

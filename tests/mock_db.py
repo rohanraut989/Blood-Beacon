@@ -91,6 +91,11 @@ def insert_request(patient_name, blood_group, component, units, hospital_name, c
 def get_request(request_id):
     return _test_requests.get(request_id)
 
+def update_request_match_pool_count(request_id, count):
+    if request_id in _test_requests:
+        _test_requests[request_id]["match_pool_count"] = count
+    return _test_requests.get(request_id)
+
 def get_all_requests():
     return sorted(_test_requests.values(), key=lambda r: r["created_at"], reverse=True)
 
@@ -181,7 +186,7 @@ def get_alerts_for_donor(donor_id):
 
 _test_alerts = {}
 
-def insert_alert(request_id, donor_id, wave_no, channel):
+def insert_alert(request_id, donor_id, wave_no, channel, match_tier=1, cross_group=False):
     """Insert an alert for a request."""
     _id_counter["alerts"] = _id_counter.get("alerts", 0) + 1
     alert = {
@@ -190,6 +195,8 @@ def insert_alert(request_id, donor_id, wave_no, channel):
         "donor_id": donor_id,
         "wave_no": wave_no,
         "channel": channel,
+        "match_tier": match_tier,
+        "cross_group": cross_group,
         "sent_at": "2024-01-01T00:00:00Z",
         "stage": "awaiting_recency",
         "reply": None,

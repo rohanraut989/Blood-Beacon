@@ -226,11 +226,17 @@ def request_blood():
                     detail="Automatically verified on public submission"
                 )
                 activate_request(req["id"], _internal=True)
-                flash(
-                    f"Request submitted for {patient_name}. "
-                    f"Status: Active — donors are being alerted (id: {req['id']})",
-                    "success"
-                )
+                if db.get_alerts_for_request(req["id"]):
+                    message = (
+                        f"Request submitted for {patient_name}. "
+                        f"Status: Active — donors are being alerted (id: {req['id']})"
+                    )
+                else:
+                    message = (
+                        f"Request submitted for {patient_name}. "
+                        "No matching donors are available yet; the request remains open."
+                    )
+                flash(message, "success")
                 return redirect(url_for("request_status", request_id=req["id"]))
             else:
                 flash("Database not configured. Request not saved.", "warning")
@@ -311,6 +317,11 @@ def request_status(request_id):
         request=req,
         is_staff=False,
         alerts=alert_details,
+        tier_counts={
+            "exact": sum(1 for alert in alerts if alert.get("wave_no") == 1 and alert.get("match_tier", 1) == 1),
+            "compatible": sum(1 for alert in alerts if alert.get("wave_no") == 1 and alert.get("match_tier") == 2),
+            "far": sum(1 for alert in alerts if alert.get("wave_no") == 1 and alert.get("match_tier") == 3),
+        },
         confirmed_donors=[
             alert["donor"] for alert in alert_details
             if alert.get("reply") == "confirmed" and alert.get("donor")
@@ -440,14 +451,15 @@ def activate_request(request_id, _internal=False):
             flash(f"Request cannot be activated (status: {req['status']}).", "error")
             return redirect(url_for("request_status", request_id=request_id, staff=1))
     
-    # Get eligible donors and rank them
-    all_donors = db.get_donors_by_city(req["city"])
+    # Build the matching ladder before ranking: predictor scores only order
+    # donors within a tier, never across exact/compatible/distant tiers.
+    all_donors = db.get_all_donors()
     
     rules_list = db.get_all_rules()
     rules_dict = {r["key"]: r["value"] for r in rules_list}
     
     today = date.today()
-    eligible_donors = []
+    eligible_by_tier = {1: [], 2: [], 3: []}
     
     donations_by_donor = {}
     alerts_by_donor = {}
@@ -469,16 +481,20 @@ def activate_request(request_id, _internal=False):
         donor_info["eligibility_status"] = assessment["status"]
         
         if assessment["status"] == "eligible":
-            eligible_donors.append(donor_info)
-    
-    # Rank eligible donors
-    ranked_with_scores = predictor.rank_donors(
-        req,
-        eligible_donors,
-        donations_by_donor,
-        alerts_by_donor,
-        today
-    )
+            donor_group = donor.get("blood_group")
+            same_city = donor.get("city") == req.get("city")
+            exact = donor_group == req.get("blood_group")
+            tier = 1 if same_city and exact else 2 if same_city else 3
+            donor_info["match_tier"] = tier
+            donor_info["cross_group"] = not exact
+            eligible_by_tier[tier].append(donor_info)
+
+    ranked_with_scores = []
+    for tier in (1, 2, 3):
+        ranked_with_scores.extend(predictor.rank_donors(
+            req, eligible_by_tier[tier], donations_by_donor,
+            alerts_by_donor, today
+        ))
     
     # Convert to just donor dicts for planner
     ranked_donors = [donor for donor, score, reason in ranked_with_scores]
@@ -488,6 +504,10 @@ def activate_request(request_id, _internal=False):
     plan = alerting.plan_waves(ranked_with_scores, req, alerts_by_donor, now)
     
     # Activate request
+    db.update_request_match_pool_count(
+        request_id,
+        sum(len(donors) for donors in eligible_by_tier.values())
+    )
     db.update_request_status(request_id, "active")
     
     # Determine channel (whatsapp for real requests, simulator for testing)
@@ -500,7 +520,9 @@ def activate_request(request_id, _internal=False):
             request_id=request_id,
             donor_id=donor["id"],
             wave_no=1,
-            channel=channel
+            channel=channel,
+            match_tier=donor.get("match_tier", 1),
+            cross_group=donor.get("cross_group", False),
         )
         
         # If WhatsApp channel, send message via bridge
@@ -517,8 +539,13 @@ def activate_request(request_id, _internal=False):
     )
     if not skip_detail:
         skip_detail = "0 skipped (no planner exclusions)"
+    tier_counts = {
+        tier: sum(1 for donor in wave1_donors if donor.get("match_tier", 1) == tier)
+        for tier in (1, 2, 3)
+    }
     wave_detail = (
-        f"Wave 1: {len(wave1_donors)} sent, {skip_detail}; "
+        f"Wave 1: {tier_counts[1]} exact, {tier_counts[2]} compatible, "
+        f"{tier_counts[3]} far; {skip_detail}; "
         f"Wave 2: {len(plan['wave2'])} queued"
     )
     db.insert_audit_log(
@@ -542,6 +569,15 @@ def _recency_message(req):
         f"{_patient_first_name(req)} needs {req.get('blood_group')} blood at "
         f"{req.get('hospital_name')}, {req.get('city')}. "
         "Did you donate blood in the last 3 months? Reply 1 = Yes, 2 = No"
+    )
+
+def _cross_group_recency_message(donor, req):
+    return (
+        f"Urgent: {_patient_first_name(req)} needs {req.get('blood_group')} blood at "
+        f"{req.get('hospital_name')}, {req.get('city')}. No {req.get('blood_group')} "
+        f"donor was found nearby — but your {donor.get('blood_group')} blood can "
+        "also be given to this patient. Did you donate blood in the last 3 months? "
+        "Reply 1 = Yes, 2 = No"
     )
 
 def _confirm_message(req):
@@ -580,7 +616,12 @@ def _send_whatsapp_message(phone, message):
 
 def _send_whatsapp_alert(donor, req):
     """Send the first step of the donor conversation."""
-    _send_whatsapp_message(donor["phone"], _recency_message(req))
+    message = (
+        _cross_group_recency_message(donor, req)
+        if donor.get("cross_group")
+        else _recency_message(req)
+    )
+    _send_whatsapp_message(donor["phone"], message)
 
 _WHATSAPP_VERIFY_PROMPT = (
     "To verify your WhatsApp, please reply with your registered mobile number."
@@ -668,13 +709,13 @@ def advance_simulation(request_id, _internal=False):
         flash(f"Request fulfilled! {confirmed_count} donors confirmed.", "success")
     else:
         # Not enough confirmations, fire Wave 2
-        all_donors = db.get_donors_by_city(req["city"])
+        all_donors = db.get_all_donors()
         
         rules_list = db.get_all_rules()
         rules_dict = {r["key"]: r["value"] for r in rules_list}
         
         today = date.today()
-        eligible_donors = []
+        eligible_by_tier = {1: [], 2: [], 3: []}
         donations_by_donor = {}
         alerts_by_donor = {}
         
@@ -692,16 +733,20 @@ def advance_simulation(request_id, _internal=False):
             donor_info["eligibility_status"] = assessment["status"]
             
             if assessment["status"] == "eligible":
-                eligible_donors.append(donor_info)
+                exact = donor.get("blood_group") == req.get("blood_group")
+                same_city = donor.get("city") == req.get("city")
+                tier = 1 if same_city and exact else 2 if same_city else 3
+                donor_info["match_tier"] = tier
+                donor_info["cross_group"] = not exact
+                eligible_by_tier[tier].append(donor_info)
         
         # Rank eligible donors
-        ranked_with_scores = predictor.rank_donors(
-            req,
-            eligible_donors,
-            donations_by_donor,
-            alerts_by_donor,
-            today
-        )
+        ranked_with_scores = []
+        for tier in (1, 2, 3):
+            ranked_with_scores.extend(predictor.rank_donors(
+                req, eligible_by_tier[tier], donations_by_donor,
+                alerts_by_donor, today
+            ))
         
         # Plan waves
         now = datetime.now()
@@ -719,7 +764,9 @@ def advance_simulation(request_id, _internal=False):
                 request_id=request_id,
                 donor_id=donor["id"],
                 wave_no=2,
-                channel=wave1_channel
+                channel=wave1_channel,
+                match_tier=donor.get("match_tier", 1),
+                cross_group=donor.get("cross_group", False),
             )
             
             # If WhatsApp channel, send message via bridge
@@ -1236,7 +1283,8 @@ def whatsapp_reply():
                 return {"status": "awaiting_confirm"}, 200
             _send_whatsapp_message(
                 phone,
-                f"Please reply 1 = Yes, 2 = No. {_recency_message(request_obj)}"
+                f"Please reply 1 = Yes, 2 = No. "
+                f"{_cross_group_recency_message(donor, request_obj) if matching_alert.get('cross_group') else _recency_message(request_obj)}"
             )
             return {"status": "invalid_reply_reask_sent", "stage": stage}, 200
 
