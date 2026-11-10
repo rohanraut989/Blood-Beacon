@@ -140,8 +140,14 @@ export async function createBridgeAPI({ socket, bridgeSecret = '', stateStore, p
           if (socket) {
             const jid = `${normalizedPhone}@s.whatsapp.net`;
             await socket.sendMessage(jid, { text: message });
-            if (typeof socket.onWhatsApp === 'function' && stateStore) {
-              const identities = await socket.onWhatsApp(normalizedPhone);
+            let identities = [];
+            if (typeof socket.onWhatsApp === 'function') {
+              identities = await socket.onWhatsApp(normalizedPhone);
+              console.log(`onWhatsApp(${normalizedPhone}) result: ${JSON.stringify(identities)}`);
+            } else {
+              console.log(`onWhatsApp(${normalizedPhone}) result: [] (unavailable)`);
+            }
+            if (stateStore) {
               for (const identity of identities || []) {
                 if (identity?.jid?.endsWith('@lid')) {
                   stateStore.setLidPhone(identity.jid, normalizedPhone);
@@ -159,6 +165,37 @@ export async function createBridgeAPI({ socket, bridgeSecret = '', stateStore, p
         } catch (error) {
           console.error('Send failed:', error);
           res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/pair') {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', async () => {
+        try {
+          const { lid, phone } = JSON.parse(body);
+          const normalizedLid = digitsOnlyPhone(lid);
+          const normalizedPhone = digitsOnlyPhone(phone);
+          if (!normalizedLid || !normalizedPhone) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Missing lid or phone' }));
+            return;
+          }
+          if (!stateStore) {
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'State store unavailable' }));
+            return;
+          }
+          stateStore.setLidPhone(normalizedLid, normalizedPhone);
+          await stateStore.save();
+          console.log(`Paired LID ${normalizedLid} with phone ${normalizedPhone}`);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, lid: normalizedLid, phone: normalizedPhone }));
+        } catch (error) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: error.message }));
         }
       });

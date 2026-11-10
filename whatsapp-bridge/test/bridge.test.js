@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { createStateStore } from '../state.js';
 import { createBridgeLifecycle } from '../lifecycle.js';
-import { createMessageHandler, digitsOnlyPhone } from '../messages.js';
+import { createBridgeAPI, createMessageHandler, digitsOnlyPhone } from '../messages.js';
 import { requireBridgeSecret } from '../config.js';
 import { spawnSync } from 'node:child_process';
 import { unlink } from 'node:fs/promises';
@@ -72,6 +72,62 @@ test('Inbound @lid message resolves through the persisted LID map', async () => 
 
   assert.strictEqual(JSON.parse(requests[0].options.body).phone, '919876543210');
   await unlink(statePath);
+});
+
+test('Authenticated /pair persists a LID mapping used by inbound replies', async () => {
+  const statePath = `pair-test-${process.pid}-${Date.now()}`;
+  const store = createStateStore(statePath);
+  await store.load();
+  const port = 32000 + (process.pid % 1000);
+  const server = await createBridgeAPI({
+    socket: {},
+    bridgeSecret: 'shared-secret',
+    stateStore: store,
+    port,
+  });
+  if (!server.listening) {
+    await new Promise((resolve) => server.once('listening', resolve));
+  }
+  try {
+    const wrong = await fetch(`http://127.0.0.1:${port}/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Bridge-Secret': 'wrong' },
+      body: JSON.stringify({ lid: '103860949528819@lid', phone: '+91 98765-43210' }),
+    });
+    assert.strictEqual(wrong.status, 401);
+
+    const paired = await fetch(`http://127.0.0.1:${port}/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Bridge-Secret': 'shared-secret' },
+      body: JSON.stringify({ lid: '103860949528819@lid', phone: '+91 98765-43210' }),
+    });
+    assert.strictEqual(paired.status, 200);
+
+    const reloaded = createStateStore(statePath);
+    await reloaded.load();
+    assert.strictEqual(reloaded.getPhoneForLid('103860949528819@lid'), '919876543210');
+
+    const requests = [];
+    const handler = createMessageHandler({
+      socket: {},
+      flask: 'http://flask',
+      logger: console,
+      stateStore: reloaded,
+      bridgeSecret: 'shared-secret',
+      fetchImpl: async (url, options) => {
+        requests.push({ url, options });
+        return { status: 200, ok: true, json: async () => ({ ok: true }) };
+      },
+    });
+    await handler({
+      key: { id: 'paired-lid-message-1', remoteJid: '103860949528819@lid' },
+      message: { conversation: '2' },
+    });
+    assert.strictEqual(JSON.parse(requests[0].options.body).phone, '919876543210');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await unlink(statePath);
+  }
 });
 
 test('Unresolved @lid forwards raw JID and logs the full message key', async () => {

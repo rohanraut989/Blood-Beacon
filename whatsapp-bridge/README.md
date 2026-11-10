@@ -61,6 +61,12 @@ The bridge will automatically detect the connection and start listening for dono
 - Response: `{ ok: true }` or error
 - Used by: Flask to send Wave 1 alerts
 
+**POST `/pair`**
+- Headers: `X-Bridge-Secret: <secret>`
+- Body: `{ lid, phone }` (bare digits or a full `@lid` JID are accepted)
+- Persists a digits-only LID-to-phone mapping for inbound replies whose
+  WhatsApp payload has no phone identity.
+
 ## Reliability Features
 
 1. **Message Deduplication:** Each message ID is processed exactly once. Upserts with type `notify` or `append` are both handled.

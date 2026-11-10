@@ -17,9 +17,10 @@ export function createStateStore(path) {
     },
 
     setLidPhone(lid, phone) {
-      const key = String(lid);
-      state.lidToPhone[key] = phone;
-      if (key.includes('@')) state.lidToPhone[key.split('@')[0]] = phone;
+      const key = String(lid).split('@')[0].replace(/\D/g, '');
+      const normalizedPhone = String(phone).replace(/\D/g, '');
+      if (!key || !normalizedPhone) throw new Error('LID and phone must contain digits');
+      state.lidToPhone[key] = normalizedPhone;
     },
 
     async save() {

@@ -1259,6 +1259,14 @@ authenticated bridge `/status` endpoint with the shared secret and displays a
 brief error when that check fails, rather than reporting an unqualified
 connection state.
 
+## Admin LID Pairing
+
+The authenticated bridge `POST /pair` endpoint accepts `{lid, phone}` and
+persists a digits-only mapping in `bridge-state.json`. This is the manual
+fallback for stable WhatsApp `@lid` identities that expose no alternate phone
+field. Every outbound `/send` also logs the complete `onWhatsApp(phone)` result
+so newly returned LIDs are visible for diagnosis and automatic learning.
+
 ## Supabase Timestamp Parsing
 
 Supabase `timestamptz` values are accepted by the shared `utils.parse_date`
