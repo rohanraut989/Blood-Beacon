@@ -170,3 +170,15 @@ def insert_audit_log(actor: str, action: str, entity: str, entity_id: int = None
         "detail": detail,
     }).execute()
     return result.data[0] if result.data else None
+
+# === ALERTS (Stage 3+) ===
+
+def get_alerts_for_donor(donor_id: int) -> list:
+    """Get all past alerts sent to a donor (for predictor features)."""
+    try:
+        db = get_db()
+        result = db.table("alerts").select("*").eq("donor_id", donor_id).execute()
+        return result.data if result.data else []
+    except Exception:
+        # Table may not exist yet in early stages
+        return []

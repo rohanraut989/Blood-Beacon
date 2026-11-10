@@ -45,17 +45,22 @@
 
 {% if eligible_donors %}
     <h3 style="color: #28a745; margin-bottom: 15px;">✓ Eligible Donors ({{ eligible_donors|length }})</h3>
+    {% if synthetic_data %}
+        <p style="background: #e7f3ff; border: 1px solid #b3d9ff; border-radius: 4px; padding: 10px; margin-bottom: 15px; font-size: 12px; color: #004085;">
+            ℹ️ <strong>Ranking by predicted show-up probability — model trained on synthetic history in this version.</strong>
+        </p>
+    {% endif %}
     <div style="display: grid; gap: 12px; margin-bottom: 30px;">
         {% for donor in eligible_donors %}
             <div style="
-                border: 2px solid #28a745;
+                border: 2px solid {% if donor.exact_match %}#28a745{% else %}#adb5bd{% endif %};
                 border-radius: 8px;
                 padding: 15px;
-                background: #f8fdf9;
+                background: {% if donor.exact_match %}#f8fdf9{% else %}#f9f9f9{% endif %};
                 transition: box-shadow 0.2s;
             " onmouseover="this.style.boxShadow='0 4px 12px rgba(40,167,69,0.15)'" 
                onmouseout="this.style.boxShadow='none'">
-                <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 15px; font-size: 14px;">
+                <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1.5fr; gap: 15px; font-size: 14px;">
                     <div>
                         <strong style="color: #333;">{{ donor.name }}</strong>
                         <p style="color: #666; font-size: 12px; margin-top: 3px;">
@@ -66,17 +71,17 @@
                         <span style="
                             display: inline-block;
                             padding: 6px 12px;
-                            background: {% if donor.blood_group == request.blood_group %}#28a745{% else %}#6c757d{% endif %};
+                            background: {% if donor.exact_match %}#28a745{% else %}#6c757d{% endif %};
                             color: white;
                             border-radius: 4px;
                             font-weight: 600;
                             font-size: 13px;
                         ">{{ donor.blood_group }}</span>
-                        {% if donor.blood_group != request.blood_group %}
+                        {% if not donor.exact_match %}
                             <p style="font-size: 11px; color: #6c757d; margin-top: 3px;">Compatible</p>
                         {% endif %}
                     </div>
-                    <div style="text-align: right;">
+                    <div style="text-align: center;">
                         <span style="
                             display: inline-block;
                             padding: 6px 12px;
@@ -86,6 +91,10 @@
                             font-weight: 600;
                             font-size: 12px;
                         ">ELIGIBLE</span>
+                    </div>
+                    <div style="text-align: right;">
+                        <strong style="font-size: 18px; color: #28a745;">{{ "%.0f"|format(donor.predicted_showup * 100) }}%</strong>
+                        <p style="font-size: 11px; color: #666; margin-top: 2px;">{{ donor.prediction_reason }}</p>
                     </div>
                 </div>
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e8f5e9; font-size: 13px; color: #666;">

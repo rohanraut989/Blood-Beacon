@@ -1,6 +1,6 @@
 # BloodBeacon — Build Status
 
-## Current Stage: 2 (COMPLETE) ✅
+## Current Stage: 3 (COMPLETE) ✅
 
 ### Stage 1: Skeleton + Data Model
 
@@ -335,7 +335,70 @@ When you have Supabase credentials:
 
 ---
 
-### Next Stage (Stage 3)
+### Stage 3: Donor Response Predictor (AI)
+
+**Objective:** Build a scikit-learn model to predict donor show-up probability based on synthetic history, rank eligible donors by predicted show-up, and integrate into match preview.
+
+**Status:** ✅ COMPLETE (56 tests passing; 11 Stage 3 tests + 45 Stage 1+2 backward compatible)
+
+**What Was Built:**
+
+1. **Training Data Generator (`make_training_data.py`)**
+   - ✅ Generates `data/training_outcomes.csv` with 600 rows (deterministic, fixed seed)
+   - ✅ Features: days_since_last_donation, total_donations, alerts_last_30d, past_response_rate, past_showup_rate, same_area, hour_of_day
+   - ✅ Label: showed_up (0/1) generated from documented SYNTHETIC RULE
+   - ✅ SYNTHETIC RULE documented in code: base 50%, +20% response/showup, +10% same_area, -3% per alert (fatigue), -10% if <5 days since donation, -5% if inconvenient hours, ±10% noise
+   - ✅ Both labels (0 and 1) present in CSV
+
+2. **Predictor Module (`predictor.py`)**
+   - ✅ `train_model()`: trains LogisticRegression on synthetic CSV with StandardScaler, saves to `models/predictor.joblib`
+   - ✅ Model accuracy: **70.0%** (beats baseline 69.2%)
+   - ✅ `score_donor(features)` → returns probability in [0, 1]
+   - ✅ `rank_donors(request, eligible_donors, donations_by_donor, alerts_by_donor, today)` → list of (donor, score, reason)
+   - ✅ Reasons: "replies often", "shows up reliably", "same area", "well rested", "alerted often recently", "too soon after donation", "outside convenient hours", "neutral history"
+   - ✅ New donors (no history) get neutral rates (0.5), never zeros
+
+3. **Match Preview Integration**
+   - ✅ Eligible donors now ranked by predicted show-up probability (best first)
+   - ✅ Each row shows: name, area, blood group, ELIGIBLE status, **percentage (0-100%)**, and reason
+   - ✅ Exact-match blood group visually marked
+   - ✅ Honest disclaimer on page: "Ranking by predicted show-up probability — model trained on synthetic history in this version."
+   - ✅ Deferred section unchanged
+
+4. **Database Support**
+   - ✅ Added `db.get_alerts_for_donor()` for future Stage 4+ (returns [] for now)
+   - ✅ Mock DB supports alerts stub
+
+5. **Tests**
+   - ✅ Test CSV generates deterministically (same seed → same hash)
+   - ✅ Test CSV has 600 rows with both labels
+   - ✅ Test model trains and saves successfully
+   - ✅ Test accuracy in [0, 1] and beats baseline
+   - ✅ Test score_donor returns [0, 1] probability
+   - ✅ Test new donor gets reasonable score (>0.3), not minimum
+   - ✅ Test ranking fixture: Donor A (same area, high rates, no alerts, well-rested) beats Donor B (different area, low rates, 6 alerts, recent donation)
+   - ✅ Test ranking returns donor, score, and reason
+
+**Accuracy Report:**
+- Held-out accuracy: **70.0%** (tested on 20% held-out set)
+- Baseline accuracy: **69.2%** (majority class)
+- **Model beats baseline: ✓**
+
+**All Tests Passing:**
+- Stage 1 tests: 18/18 passing ✓
+- Stage 2 tests: 27/27 passing ✓
+- Stage 3 tests: 11/11 passing ✓
+- **Total: 56/56 passing** ✓
+
+**Important Notes:**
+- Model is trained on **SYNTHETIC data only** (no real alert outcomes yet)
+- Accuracy is advisory; the model will retrain on real data in Stage 4+
+- The synthetic rule is honest and documented; never presented as real to users
+- UI explicitly warns users about synthetic training data
+
+---
+
+### Next Stage (Stage 4)
 
 - **Staff activation workflow** — Mark requests as active, trigger donor alerts
 - **Donor response system** — Track donor responses (committed, on way, unavailable)
@@ -353,13 +416,14 @@ When you have Supabase credentials:
 
 ### Blockers / Issues
 
-None. All Stage 1 + Stage 2 + Stage 2.1 objectives complete and all 45 tests passing.
+None. All Stage 1 + Stage 2 + Stage 2.1 + Stage 3 objectives complete and all 56 tests passing.
 
 ---
 
 **Last Updated:** 2024-11-10  
-**Stages Complete:** Stage 1 ✅, Stage 2 ✅, Stage 2.1 (Corrections) ✅
-**Total Tests:** 45 passing  
+**Stages Complete:** Stage 1 ✅, Stage 2 ✅, Stage 2.1 (Corrections) ✅, Stage 3 (Predictor) ✅
+**Total Tests:** 56 passing  
 **Commits:**
   - Stage 2: `eligibility + compatibility engines, match preview upgrade`
   - Stage 2.1: `plasma matrix correction + RBC table test`
+  - Stage 3: `donor response predictor` (coming)

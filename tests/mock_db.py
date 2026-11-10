@@ -150,3 +150,9 @@ def insert_audit_log(actor, action, entity, entity_id=None, detail=None):
     }
     _test_audit_log[log_entry["id"]] = log_entry
     return log_entry
+
+# === ALERTS (Stage 3+) ===
+
+def get_alerts_for_donor(donor_id):
+    """Get all alerts for a donor (returns empty list if no alerts table)."""
+    return []  # Mock: no alert history yet
