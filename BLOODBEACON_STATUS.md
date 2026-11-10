@@ -1244,6 +1244,12 @@ Inbound Baileys `@lid` identities resolve through `remoteJidAlt`,
 `participantAlt`, or `senderPn` before digits-only forwarding; unresolved
 identities are forwarded as the raw JID and logged for diagnosis.
 
+The bridge also consults Baileys' LID mapping store and a persisted
+`lidToPhone` map in `bridge-state.json`. Successful outbound sends call
+`onWhatsApp(phone)` and learn canonical `@lid` identities for future inbound
+replies. If no mapping is available, the full inbound message key is logged
+before forwarding the raw JID.
+
 ## Supabase Timestamp Parsing
 
 Supabase `timestamptz` values are accepted by the shared `utils.parse_date`

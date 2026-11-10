@@ -5,6 +5,36 @@ export function digitsOnlyPhone(phone) {
   return String(phone || '').replace(/\D/g, '');
 }
 
+async function resolveLidPhone({ message, socket, stateStore }) {
+  const rawJid = message.key.remoteJid || '';
+  for (const alternateIdentity of [
+    message.key.remoteJidAlt,
+    message.key.participantAlt,
+    message.key.senderPn,
+  ]) {
+    if (!alternateIdentity || String(alternateIdentity).endsWith('@lid')) continue;
+    const alternatePhone = digitsOnlyPhone(alternateIdentity);
+    if (alternatePhone) return { phone: alternatePhone, source: 'alternate identity' };
+  }
+
+  const lid = rawJid.split('@')[0];
+  const getPNForLID = socket?.signalRepository?.lidMapping?.getPNForLID;
+  if (typeof getPNForLID === 'function') {
+    try {
+      const mapped = await getPNForLID.call(socket.signalRepository.lidMapping, lid);
+      const phone = digitsOnlyPhone(mapped);
+      if (phone) return { phone, source: 'Baileys LID map' };
+    } catch (error) {
+      console.warn(`Baileys LID lookup failed for ${rawJid}: ${error?.message || error}`);
+    }
+  }
+
+  const mapping = stateStore.getPhoneForLid(rawJid) || stateStore.getPhoneForLid(lid);
+  if (mapping) return { phone: digitsOnlyPhone(mapping), source: 'persisted LID map' };
+
+  return { phone: '', source: 'unresolved' };
+}
+
 export function createMessageHandler({
   socket, flask, logger, seen, stateStore, bridgeSecret, fetchImpl = fetch,
 }) {
@@ -44,15 +74,17 @@ export function createMessageHandler({
 
     const text = (message.message?.conversation || message.message?.extendedTextMessage?.text || '').trim();
     const rawJid = message.key.remoteJid || '';
-    const alternateIdentity = message.key.remoteJidAlt
-      || message.key.participantAlt
-      || message.key.senderPn;
-    const resolvedPhone = rawJid.endsWith('@lid')
-      ? digitsOnlyPhone(alternateIdentity)
-      : digitsOnlyPhone(rawJid.replace('@s.whatsapp.net', ''));
+    let source = 'remote JID';
+    let resolvedPhone = digitsOnlyPhone(rawJid.replace('@s.whatsapp.net', ''));
+    if (rawJid.endsWith('@lid')) {
+      ({ phone: resolvedPhone, source } = await resolveLidPhone({ message, socket, stateStore }));
+    }
     const sender = resolvedPhone || rawJid;
 
-    console.log(`Inbound message: raw JID=${rawJid}, resolved phone=${sender}, text="${text}"`);
+    if (source === 'unresolved') {
+      console.warn(`Unable to resolve @lid; message key=${JSON.stringify(message.key)}`);
+    }
+    console.log(`Inbound message: raw JID=${rawJid}, resolved phone=${sender}, source=${source}, text="${text}"`);
     if (!text) return;
 
     try {
@@ -69,7 +101,7 @@ export function createMessageHandler({
 }
 
 // HTTP API server for Flask -> Bridge communication
-export async function createBridgeAPI({ socket, bridgeSecret = '', port = 3100 }) {
+export async function createBridgeAPI({ socket, bridgeSecret = '', stateStore, port = 3100 }) {
   const { createServer } = await import('node:http');
 
   const server = createServer(async (req, res) => {
@@ -104,6 +136,15 @@ export async function createBridgeAPI({ socket, bridgeSecret = '', port = 3100 }
           if (socket) {
             const jid = `${normalizedPhone}@s.whatsapp.net`;
             await socket.sendMessage(jid, { text: message });
+            if (typeof socket.onWhatsApp === 'function' && stateStore) {
+              const identities = await socket.onWhatsApp(normalizedPhone);
+              for (const identity of identities || []) {
+                if (identity?.jid?.endsWith('@lid')) {
+                  stateStore.setLidPhone(identity.jid, normalizedPhone);
+                }
+              }
+              await stateStore.save();
+            }
             console.log(`Sent to ${normalizedPhone}: "${message}"`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true }));

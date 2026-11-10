@@ -5,6 +5,7 @@ import { createBridgeLifecycle } from '../lifecycle.js';
 import { createMessageHandler, digitsOnlyPhone } from '../messages.js';
 import { requireBridgeSecret } from '../config.js';
 import { spawnSync } from 'node:child_process';
+import { unlink } from 'node:fs/promises';
 
 test('Phone normalization: bridge JID input is digits-only', () => {
   assert.strictEqual(digitsOnlyPhone('+91 98765-43210'), '919876543210');
@@ -12,7 +13,8 @@ test('Phone normalization: bridge JID input is digits-only', () => {
 });
 
 test('Inbound @lid message forwards its alternate digits-only phone', async () => {
-  const store = createStateStore(`lid-test-${process.pid}-${Date.now()}`);
+  const statePath = `lid-test-${process.pid}-${Date.now()}`;
+  const store = createStateStore(statePath);
   await store.load();
   const requests = [];
   const handler = createMessageHandler({
@@ -39,6 +41,73 @@ test('Inbound @lid message forwards its alternate digits-only phone', async () =
   assert.strictEqual(requests.length, 1);
   assert.strictEqual(JSON.parse(requests[0].options.body).phone, '919876543210');
   assert.strictEqual(requests[0].options.headers['X-Bridge-Secret'], 'shared-secret');
+  await unlink(statePath);
+});
+
+test('Inbound @lid message resolves through the persisted LID map', async () => {
+  const statePath = `lid-map-test-${process.pid}-${Date.now()}`;
+  const saved = createStateStore(statePath);
+  saved.setLidPhone('103860949528819@lid', '+91 98765-43210');
+  await saved.save();
+
+  const store = createStateStore(statePath);
+  await store.load();
+  const requests = [];
+  const handler = createMessageHandler({
+    socket: {},
+    flask: 'http://flask',
+    logger: console,
+    stateStore: store,
+    bridgeSecret: 'shared-secret',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { status: 200, ok: true, json: async () => ({ ok: true }) };
+    },
+  });
+
+  await handler({
+    key: { id: 'lid-map-message-1', remoteJid: '103860949528819@lid' },
+    message: { conversation: '2' },
+  });
+
+  assert.strictEqual(JSON.parse(requests[0].options.body).phone, '919876543210');
+  await unlink(statePath);
+});
+
+test('Unresolved @lid forwards raw JID and logs the full message key', async () => {
+  const statePath = `lid-unresolved-test-${process.pid}-${Date.now()}`;
+  const store = createStateStore(statePath);
+  await store.load();
+  const requests = [];
+  const warnings = [];
+  const key = {
+    id: 'lid-unresolved-message-1',
+    remoteJid: '103860949528819@lid',
+    unusualField: 'visible-in-dump',
+  };
+  const handler = createMessageHandler({
+    socket: {},
+    flask: 'http://flask',
+    logger: console,
+    stateStore: store,
+    bridgeSecret: 'shared-secret',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { status: 200, ok: true, json: async () => ({ ok: true }) };
+    },
+  });
+
+  const originalWarn = console.warn;
+  console.warn = (line) => warnings.push(line);
+  try {
+    await handler({ key, message: { conversation: '2' } });
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.strictEqual(JSON.parse(requests[0].options.body).phone, key.remoteJid);
+  assert.match(warnings[0], /"unusualField":"visible-in-dump"/);
+  await unlink(statePath);
 });
 
 test('Bridge refuses to start without BRIDGE_SECRET', () => {

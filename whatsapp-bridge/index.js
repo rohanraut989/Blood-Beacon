@@ -79,6 +79,7 @@ const active = bridge.getActive?.();
 await createBridgeAPI({
   socket: active,
   bridgeSecret,
+  stateStore,
   port: parseInt(process.env.BRIDGE_PORT || '3100', 10),
 });
 
