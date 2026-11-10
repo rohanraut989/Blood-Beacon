@@ -6,14 +6,16 @@ export function digitsOnlyPhone(phone) {
 }
 
 export function createMessageHandler({
-  socket, flask, logger, seen, stateStore, fetchImpl = fetch,
+  socket, flask, logger, seen, stateStore, bridgeSecret, fetchImpl = fetch,
 }) {
+  if (!bridgeSecret) throw new Error('bridgeSecret is required');
+
   async function post(url, body) {
     console.log(`Posting to Flask: ${url}`);
     const response = await fetchImpl(`${flask}${url}`, {
       method: 'POST',
       body: JSON.stringify(body),
-      headers: { 'Content-Type': 'application/json', 'X-Bridge-Secret': process.env.BRIDGE_SECRET || '' },
+      headers: { 'Content-Type': 'application/json', 'X-Bridge-Secret': bridgeSecret },
       signal: AbortSignal.timeout(30 * 1000), // 30s timeout per spec
     });
     console.log(`Flask response: ${response.status}`);
@@ -41,19 +43,25 @@ export function createMessageHandler({
     if (message.key.remoteJid?.includes('@g.us')) return; // Ignore group messages
 
     const text = (message.message?.conversation || message.message?.extendedTextMessage?.text || '').trim();
-    const senderPhone = digitsOnlyPhone(message.key.remoteJid?.replace('@s.whatsapp.net', ''));
+    const rawJid = message.key.remoteJid || '';
+    const alternateIdentity = message.key.remoteJidAlt
+      || message.key.participantAlt
+      || message.key.senderPn;
+    const resolvedPhone = rawJid.endsWith('@lid')
+      ? digitsOnlyPhone(alternateIdentity)
+      : digitsOnlyPhone(rawJid.replace('@s.whatsapp.net', ''));
+    const sender = resolvedPhone || rawJid;
 
-    if (!text || !senderPhone) return;
-
-    console.log(`Received from ${senderPhone}: "${text}"`);
+    console.log(`Inbound message: raw JID=${rawJid}, resolved phone=${sender}, text="${text}"`);
+    if (!text) return;
 
     try {
       await post('/internal/whatsapp-reply', {
-        phone: senderPhone,
+        phone: sender,
         text,
         message_id: messageId,
       });
-      console.log(`Reply from ${senderPhone} posted to Flask`);
+      console.log(`Reply from ${sender} posted to Flask`);
     } catch (error) {
       logger.error('Failed to post reply to Flask:', error?.stack || error);
     }

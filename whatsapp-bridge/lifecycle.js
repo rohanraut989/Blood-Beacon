@@ -45,10 +45,7 @@ export function createBridgeLifecycle({
         log.log(`[${new Date().toISOString()}] WhatsApp connection open`);
         if (active !== socket) return;
         log.log('BloodBeacon WhatsApp bridge is listening');
-        checkFlask().then(
-          () => log.log('Flask reachable'),
-          (error) => log.error('Flask unreachable:', error?.stack || error),
-        );
+        checkFlask().catch((error) => log.error('Flask unreachable:', error?.stack || error));
       }
 
       if (connection === 'close') {

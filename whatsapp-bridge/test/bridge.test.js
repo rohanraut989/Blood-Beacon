@@ -2,11 +2,54 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { createStateStore } from '../state.js';
 import { createBridgeLifecycle } from '../lifecycle.js';
-import { digitsOnlyPhone } from '../messages.js';
+import { createMessageHandler, digitsOnlyPhone } from '../messages.js';
+import { requireBridgeSecret } from '../config.js';
+import { spawnSync } from 'node:child_process';
 
 test('Phone normalization: bridge JID input is digits-only', () => {
   assert.strictEqual(digitsOnlyPhone('+91 98765-43210'), '919876543210');
   assert.strictEqual(digitsOnlyPhone('977-9817612738'), '9779817612738');
+});
+
+test('Inbound @lid message forwards its alternate digits-only phone', async () => {
+  const store = createStateStore(`lid-test-${process.pid}-${Date.now()}`);
+  await store.load();
+  const requests = [];
+  const handler = createMessageHandler({
+    socket: {},
+    flask: 'http://flask',
+    logger: console,
+    stateStore: store,
+    bridgeSecret: 'shared-secret',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { status: 200, ok: true, json: async () => ({ ok: true }) };
+    },
+  });
+
+  await handler({
+    key: {
+      id: 'lid-message-1',
+      remoteJid: '1234567890@lid',
+      remoteJidAlt: '+91 98765-43210@s.whatsapp.net',
+    },
+    message: { conversation: '2' },
+  });
+
+  assert.strictEqual(requests.length, 1);
+  assert.strictEqual(JSON.parse(requests[0].options.body).phone, '919876543210');
+  assert.strictEqual(requests[0].options.headers['X-Bridge-Secret'], 'shared-secret');
+});
+
+test('Bridge refuses to start without BRIDGE_SECRET', () => {
+  assert.throws(() => requireBridgeSecret({}), /BRIDGE_SECRET is required/);
+  const result = spawnSync(process.execPath, ['index.js'], {
+    cwd: new URL('..', import.meta.url),
+    env: { ...process.env, BRIDGE_SECRET: '' },
+    encoding: 'utf8',
+  });
+  assert.strictEqual(result.status, 1);
+  assert.match(result.stderr, /BRIDGE_SECRET startup error/);
 });
 
 // Test: Message ID deduplication

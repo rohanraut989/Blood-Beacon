@@ -31,7 +31,8 @@ The bridge will automatically detect the connection and start listening for dono
 ## Environment Variables
 
 - `FLASK_URL` — Flask app URL (default: `http://localhost:5001`)
-- `BRIDGE_SECRET` — Shared secret with Flask for API authentication
+- `BRIDGE_SECRET` — Required shared secret with Flask; set it in the environment
+  or `whatsapp-bridge/.env`. The bridge refuses to start if it is unset.
 - `BRIDGE_PORT` — HTTP API port (default: `3100`)
 
 ## API Contract with Flask
@@ -42,6 +43,10 @@ The bridge will automatically detect the connection and start listening for dono
 - Headers: `X-Bridge-Secret: <secret>`
 - Body: `{ phone, text, message_id }`
 - Used by: Bridge to report incoming donor replies
+
+**GET `/internal/ping`**
+- Headers: `X-Bridge-Secret: <secret>`
+- Used by the bridge at startup to verify Flask authentication
 
 ### Flask → Bridge
 
@@ -81,6 +86,11 @@ Runs unit tests for message deduplication and reconnect logic (no real WhatsApp 
 **Bridge stuck after disconnect:**
 - Check Flask is running: `curl http://localhost:5001/health`
 - Restart the bridge with `node index.js` (it will request a new QR)
+
+**Bridge reports `Flask auth FAILED`:**
+- Confirm Flask and the bridge use the same non-empty `BRIDGE_SECRET`.
+- The bridge logs each inbound raw JID and resolved phone; `@lid` messages
+  use Baileys alternate phone identities when available.
 
 **Message delays:**
 - WhatsApp may rate-limit replies; typically <5s per donor

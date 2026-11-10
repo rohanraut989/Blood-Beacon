@@ -11,13 +11,20 @@ import qrcode from 'qrcode-terminal';
 import { createMessageHandler, createBridgeAPI } from './messages.js';
 import { createStateStore } from './state.js';
 import { createBridgeLifecycle } from './lifecycle.js';
+import { requireBridgeSecret } from './config.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const flask = process.env.FLASK_URL || 'http://localhost:5001';
 const logger = pino({ level: 'warn' });
 const stateStore = createStateStore(path.join(root, 'bridge-state.json'));
 const authDir = path.join(root, '.baileys_auth');
-const bridgeSecret = process.env.BRIDGE_SECRET || 'dev-secret-no-prod-use';
+let bridgeSecret;
+try {
+  bridgeSecret = requireBridgeSecret();
+} catch (error) {
+  console.error(`BRIDGE_SECRET startup error: ${error.message}`);
+  process.exit(1);
+}
 
 await stateStore.load();
 await mkdir(authDir, { recursive: true, mode: 0o700 });
@@ -25,20 +32,39 @@ await chmod(authDir, 0o700);
 
 const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
+async function checkFlaskAuth() {
+  try {
+    const response = await fetch(`${flask}/internal/ping`, {
+      headers: { 'X-Bridge-Secret': bridgeSecret },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      console.error('Flask auth FAILED');
+      throw new Error(`Flask auth check HTTP ${response.status}`);
+    }
+    console.log('Flask auth OK');
+  } catch (error) {
+    if (!String(error?.message || '').startsWith('Flask auth check HTTP')) {
+      console.error('Flask auth FAILED');
+    }
+    throw error;
+  }
+}
+
+await checkFlaskAuth();
+
 // Start the bridge with lifecycle management
 const bridge = createBridgeLifecycle({
   makeSocket: () => makeWASocket({ auth: state, logger }),
   createHandler: (socket) => createMessageHandler({
     socket, flask, logger, stateStore,
+    bridgeSecret,
   }),
   saveCreds: async () => {
     await saveCreds();
   },
   loggedOutStatus: DisconnectReason.loggedOut,
-  checkFlask: async () => {
-    const response = await fetch(`${flask}/health`, { signal: AbortSignal.timeout(5000) });
-    if (!response.ok) throw new Error(`Flask health check HTTP ${response.status}`);
-  },
+  checkFlask: checkFlaskAuth,
   showQr: (qr) => {
     console.log('Scan the QR with a demo/spare number: WhatsApp > Settings > Linked Devices > Link a device');
     qrcode.generate(qr, { small: true });

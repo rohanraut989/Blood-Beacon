@@ -969,6 +969,14 @@ def health():
     """Health check endpoint for deployment and bridge connectivity."""
     return {"ok": True}, 200
 
+@app.route("/internal/ping", methods=["GET"])
+def internal_ping():
+    """Authenticated bridge startup check."""
+    bridge_secret = os.getenv("BRIDGE_SECRET", "")
+    if not bridge_secret or request.headers.get("X-Bridge-Secret", "") != bridge_secret:
+        return ("", 401)
+    return {"ok": True}, 200
+
 @app.route("/internal/whatsapp-reply", methods=["POST"])
 def whatsapp_reply():
     """Receive WhatsApp donor replies from the bridge.
@@ -1011,7 +1019,7 @@ def whatsapp_reply():
             None,
         )
         if not donor:
-            # Unknown number; ignore silently (idempotent)
+            print(f"WhatsApp reply matched no donor for sender {phone!r}")
             return {"status": "no_donor_for_phone"}, 200
         
         # Get all alerts for this donor to check for duplicate message_id
@@ -1031,6 +1039,7 @@ def whatsapp_reply():
         
         if not matching_alert:
             # No pending alert; ignore (idempotent)
+            print(f"WhatsApp reply matched no pending alert for sender {phone!r}")
             return {"status": "no_pending_alert"}, 200
         
         # Process the reply

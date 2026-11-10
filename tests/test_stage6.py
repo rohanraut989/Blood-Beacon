@@ -39,6 +39,17 @@ class TestHealthEndpoint:
         assert response.status_code == 200
         assert response.get_json() == {"ok": True}
 
+    def test_internal_ping_requires_bridge_secret(self, client):
+        response = client.get("/internal/ping")
+        assert response.status_code == 401
+
+        response = client.get(
+            "/internal/ping",
+            headers={"X-Bridge-Secret": "test-secret-12345"},
+        )
+        assert response.status_code == 200
+        assert response.get_json() == {"ok": True}
+
 class TestWhatsAppReplyEndpoint:
     """Tests for /internal/whatsapp-reply endpoint."""
     

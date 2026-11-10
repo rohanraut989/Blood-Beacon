@@ -1234,3 +1234,12 @@ Verified requests show the WhatsApp bridge status, donor match preview, and
 the `Activate — start Wave 1` control; active requests retain wave status,
 Advance Wave, and Close Request controls. Public request views do not expose
 these staff controls.
+
+## Bridge Inbound Authentication and LID Resolution
+
+The bridge now requires one non-empty `BRIDGE_SECRET` from its environment or
+`whatsapp-bridge/.env`, uses that value for both Flask reply posts and the
+Flask-to-bridge API, and checks authenticated `GET /internal/ping` at startup.
+Inbound Baileys `@lid` identities resolve through `remoteJidAlt`,
+`participantAlt`, or `senderPn` before digits-only forwarding; unresolved
+identities are forwarded as the raw JID and logged for diagnosis.
