@@ -203,6 +203,7 @@ def insert_alert(request_id, donor_id, wave_no, channel, match_tier=1, cross_gro
         "message_id": None,
         "replied_at": None,
         "showed_up": None,
+        "close_sent": False,
         "created_at": "2024-01-01",  # Date format only for alerting.py parsing
     }
     _test_alerts[alert["id"]] = alert
@@ -236,6 +237,13 @@ def update_alert_showup(alert_id, showed_up):
     """Mark an alert as showed_up."""
     if alert_id in _test_alerts:
         _test_alerts[alert_id]["showed_up"] = showed_up
+        return _test_alerts[alert_id]
+    return None
+
+def update_alert_close_sent(alert_id, close_sent=True):
+    """Record whether the terminal conversation close has been sent."""
+    if alert_id in _test_alerts:
+        _test_alerts[alert_id]["close_sent"] = close_sent
         return _test_alerts[alert_id]
     return None
 

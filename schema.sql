@@ -70,11 +70,13 @@ CREATE TABLE IF NOT EXISTS alerts (
   message_id TEXT,
   replied_at TIMESTAMP WITH TIME ZONE,
   showed_up BOOLEAN,
+  close_sent BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_alerts_request_id ON alerts(request_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_donor_id ON alerts(donor_id);
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS close_sent BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- rules table (NBTC rulebook)
 CREATE TABLE IF NOT EXISTS rules (

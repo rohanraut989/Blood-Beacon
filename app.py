@@ -6,7 +6,7 @@ Flask application
 import os
 import random
 import requests
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 import db
 import eligibility
@@ -667,14 +667,84 @@ def _confirm_message(req):
         f"to donate? Reply 1 = Yes, I can come, 2 = Not this time"
     )
 
+DECLINED_CLOSE_TEMPLATE = (
+    "No problem at all, {first_name} — thank you for responding. 🙏 "
+    "You may save a life another day."
+)
+DONATED_RECENTLY_CLOSE_TEMPLATE = (
+    "Thank you for donating, {first_name}! 🙏 We've noted this donation — "
+    "you'll be eligible to donate again from {eligible_date}. Until then, rest well."
+)
+CONFIRMED_CLOSE_TEMPLATE = (
+    "You're confirmed — thank you for stepping up, {first_name}! 🙏\n"
+    "You're confirmed to donate "
+)
+LATE_REPLY_CLOSE_TEMPLATE = (
+    "Thank you, {first_name} — this request has already been completed. 🙏"
+)
+
+def _donor_first_name(donor):
+    return (donor.get("name") or "Donor").split()[0]
+
 def _receiver_details_message(donor, req):
     return (
-        f"✅ Thank you, {donor.get('name', '').split()[0]}! You're confirmed to donate "
+        f"{CONFIRMED_CLOSE_TEMPLATE.format(first_name=_donor_first_name(donor))}"
         f"{req.get('blood_group')} blood for {req.get('patient_name')} at "
         f"{req.get('hospital_name')}, {req.get('city')}. Receiver contact: "
         f"{req.get('patient_name')} — {req.get('contact_phone')}. Please call them "
         f"to coordinate. Needed by: {format_human_date(req.get('needed_by'))}."
     )
+
+def _donated_recently_close_message(donor):
+    gap_days = 120 if donor.get("gender") == "Female" else 90
+    eligible_date = date.today() + timedelta(days=gap_days)
+    return DONATED_RECENTLY_CLOSE_TEMPLATE.format(
+        first_name=_donor_first_name(donor),
+        eligible_date=f"{eligible_date.day} {eligible_date.strftime('%b %Y')}",
+    )
+
+def _conversation_close_message(donor, req, alert, outcome):
+    first_name = _donor_first_name(donor)
+    if outcome == "declined":
+        return DECLINED_CLOSE_TEMPLATE.format(first_name=first_name)
+    if outcome == "donated_recently":
+        return _donated_recently_close_message(donor)
+    if outcome == "confirmed":
+        return _receiver_details_message(donor, req)
+    if outcome == "late":
+        return LATE_REPLY_CLOSE_TEMPLATE.format(first_name=first_name)
+    raise ValueError(f"Unsupported conversation close outcome: {outcome}")
+
+def _send_conversation_close(donor, req, alert, outcome):
+    """Send or record one terminal conversation close, best effort."""
+    if alert.get("close_sent"):
+        return True
+    message = _conversation_close_message(donor, req, alert, outcome)
+    # Claim the close before sending so replayed events cannot send twice.
+    db.update_alert_close_sent(alert["id"])
+    if alert.get("channel") == "simulator":
+        db.insert_audit_log(
+            actor="simulator",
+            action="receiver_details_message" if outcome == "confirmed" else "conversation_close_sent",
+            entity="alert",
+            entity_id=alert["id"],
+            detail=message,
+        )
+        return True
+    if _send_whatsapp_message(donor["phone"], message):
+        return True
+    db.insert_audit_log(
+        actor="whatsapp_system",
+        action=(
+            "receiver_details_send_failed"
+            if outcome == "confirmed"
+            else "conversation_close_send_failed"
+        ),
+        entity="alert",
+        entity_id=alert["id"],
+        detail=message,
+    )
+    return False
 
 def _send_whatsapp_message(phone, message):
     """Send one donor-facing WhatsApp message through the bridge."""
@@ -762,19 +832,15 @@ def advance_simulation(request_id, _internal=False):
                     source="self_report",
                 )
                 db.update_alert_reply(alert["id"], "donated_recently", stage="done")
+                _send_conversation_close(donor, req, alert, "donated_recently")
         elif stage == "awaiting_confirm":
             if reply in ("confirmed", "declined"):
                 db.update_alert_reply(alert["id"], reply, stage="done")
                 if reply == "confirmed":
-                    receiver_details = _receiver_details_message(donor, req)
-                    db.insert_audit_log(
-                        actor="simulator",
-                        action="receiver_details_message",
-                        entity="alert",
-                        entity_id=alert["id"],
-                        detail=receiver_details
-                    )
+                    _send_conversation_close(donor, req, alert, "confirmed")
                     confirmed_count += 1
+                else:
+                    _send_conversation_close(donor, req, alert, "declined")
     
     # Check if fulfilled
     if confirmed_count >= req.get("units", 1):
@@ -1320,6 +1386,16 @@ def whatsapp_reply():
                 break
         
         if not matching_alert:
+            # A late reply to a terminal request still receives one close.
+            for alert in all_alerts:
+                terminal_request = db.get_request(alert["request_id"])
+                if (
+                    terminal_request
+                    and terminal_request.get("status") in ("fulfilled", "closed")
+                    and not alert.get("close_sent")
+                ):
+                    _send_conversation_close(donor, terminal_request, alert, "late")
+                    return {"status": "late_reply_closed"}, 200
             # No pending alert; ignore (idempotent)
             print(f"WhatsApp reply matched no pending alert for sender {phone!r}")
             return {"status": "no_pending_alert"}, 200
@@ -1328,7 +1404,9 @@ def whatsapp_reply():
         request_obj = db.get_request(matching_alert["request_id"])
         if not request_obj:
             return {"status": "request_not_found"}, 200
-        if request_obj.get("status") == "closed":
+        if request_obj.get("status") in ("closed", "fulfilled"):
+            matching_alert["stage"] = "done"
+            _send_conversation_close(donor, request_obj, matching_alert, "late")
             db.insert_audit_log(
                 actor="whatsapp_donor",
                 action="reply_to_closed_request",
@@ -1353,10 +1431,8 @@ def whatsapp_reply():
                     source="self_report"
                 )
                 _backfill_after_definitive_reply(request_obj, matching_alert)
-                _send_whatsapp_message(
-                    phone,
-                    "Thank you for letting us know. Please take care of yourself — "
-                    "we will contact you when you are eligible again."
+                _send_conversation_close(
+                    donor, request_obj, matching_alert, "donated_recently"
                 )
                 return {"status": "reply_recorded", "reply": "donated_recently"}, 200
             if text == "2":
@@ -1389,24 +1465,13 @@ def whatsapp_reply():
             )
             db.update_alert_showup(matching_alert["id"], processed_reply == "confirmed")
             if processed_reply == "confirmed":
-                receiver_details = _receiver_details_message(donor, request_obj)
-                if matching_alert.get("channel") == "simulator":
-                    db.insert_audit_log(
-                        actor="simulator",
-                        action="receiver_details_message",
-                        entity="alert",
-                        entity_id=matching_alert["id"],
-                        detail=receiver_details
-                    )
-                elif not _send_whatsapp_message(donor["phone"], receiver_details):
-                    db.insert_audit_log(
-                        actor="whatsapp_system",
-                        action="receiver_details_send_failed",
-                        entity="alert",
-                        entity_id=matching_alert["id"],
-                        detail=receiver_details
-                    )
+                _send_conversation_close(
+                    donor, request_obj, matching_alert, "confirmed"
+                )
             elif processed_reply == "declined":
+                _send_conversation_close(
+                    donor, request_obj, matching_alert, "declined"
+                )
                 _backfill_after_definitive_reply(request_obj, matching_alert)
         # Re-evaluate request: check if fulfilled
         confirmed_count = 0

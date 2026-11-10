@@ -7,6 +7,7 @@ reply message deduplication, and bridge contract validation.
 
 import pytest
 import sys
+from datetime import date, timedelta
 import os
 from datetime import date
 from unittest.mock import patch, MagicMock
@@ -193,7 +194,8 @@ class TestWhatsAppReplyEndpoint:
         ]
         assert len(details_calls) == 1
         assert details_calls[0].kwargs["json"]["message"] == (
-            "✅ Thank you, Test! You're confirmed to donate O+ blood for Patient at "
+            "You're confirmed — thank you for stepping up, Test! 🙏\n"
+            "You're confirmed to donate O+ blood for Patient at "
             "Test Hospital, Kathmandu. Receiver contact: Patient — +977-1-555555. "
             "Please call them to coordinate. Needed by: 20 Nov 2024."
         )
@@ -302,7 +304,7 @@ class TestWhatsAppReplyEndpoint:
         assert len(donations) > 0
         assert donations[0]["source"] == "self_report"
         assert any(
-            "Thank you for letting us know" in call.kwargs["json"]["message"]
+            "Thank you for donating, Test!" in call.kwargs["json"]["message"]
             for call in mock_post.call_args_list
         )
     
@@ -575,6 +577,97 @@ class TestWhatsAppReplyEndpoint:
         assert response.status_code == 200
         data = response.get_json()
         assert data.get("status") == "request_fulfilled"
+
+    @patch("app.requests.post")
+    def test_declined_sends_one_close_without_receiver_details(self, mock_post, client):
+        mock_post.return_value = MagicMock(status_code=200)
+        donor = mock_db.insert_donor(
+            name="Decline Donor", blood_group="O+", city="Kathmandu", area="Thamel",
+            phone="+977-1-700001", gender="M", date_of_birth="1990-01-01", weight_kg=70,
+        )
+        req = mock_db.insert_request(
+            patient_name="Patient", blood_group="O+", component="whole_blood", units=2,
+            hospital_name="Test Hospital", city="Kathmandu", needed_by="2026-12-01",
+            contact_phone="+977-1-555555", created_by="staff",
+        )
+        mock_db.verify_request(req["id"], "staff")
+        mock_db.update_request_status(req["id"], "active")
+        mock_db.insert_alert(req["id"], donor["id"], 1, "whatsapp")
+
+        for text, message_id in (("2", "decline-a"), ("2", "decline-b")):
+            client.post(
+                "/internal/whatsapp-reply",
+                json={"phone": donor["phone"], "text": text, "message_id": message_id},
+                headers={"X-Bridge-Secret": "test-secret-12345"},
+            )
+        close_messages = [
+            call.kwargs["json"]["message"] for call in mock_post.call_args_list
+            if "No problem at all" in call.kwargs["json"]["message"]
+        ]
+        assert len(close_messages) == 1
+        assert "Receiver contact" not in close_messages[0]
+
+    @patch("app.requests.post")
+    def test_donated_recently_close_uses_gender_gap_date(self, mock_post, client):
+        mock_post.return_value = MagicMock(status_code=200)
+        donor = mock_db.insert_donor(
+            name="Recent Donor", blood_group="A+", city="Kathmandu", area="Thamel",
+            phone="+977-1-700002", gender="Female", date_of_birth="1990-01-01", weight_kg=70,
+        )
+        req = mock_db.insert_request(
+            patient_name="Patient", blood_group="A+", component="whole_blood", units=2,
+            hospital_name="Test Hospital", city="Kathmandu", needed_by="2026-12-01",
+            contact_phone="+977-1-555555", created_by="staff",
+        )
+        mock_db.verify_request(req["id"], "staff")
+        mock_db.update_request_status(req["id"], "active")
+        mock_db.insert_alert(req["id"], donor["id"], 1, "whatsapp")
+
+        client.post(
+            "/internal/whatsapp-reply",
+            json={"phone": donor["phone"], "text": "1", "message_id": "recent-close"},
+            headers={"X-Bridge-Secret": "test-secret-12345"},
+        )
+        eligible = date.today() + timedelta(days=120)
+        expected = f"{eligible.day} {eligible.strftime('%b %Y')}"
+        assert any(
+            f"eligible to donate again from {expected}" in call.kwargs["json"]["message"]
+            for call in mock_post.call_args_list
+        )
+
+    @patch("app.requests.post")
+    def test_simulator_close_is_recorded_without_bridge_send(self, mock_post, client):
+        donor = mock_db.insert_donor(
+            name="Simulator Donor", blood_group="B+", city="Kathmandu", area="Thamel",
+            phone="+977-1-700003", gender="M", date_of_birth="1990-01-01", weight_kg=70,
+        )
+        req = mock_db.insert_request(
+            patient_name="Patient", blood_group="B+", component="whole_blood", units=2,
+            hospital_name="Test Hospital", city="Kathmandu", needed_by="2026-12-01",
+            contact_phone="+977-1-555555", created_by="staff",
+        )
+        mock_db.verify_request(req["id"], "staff")
+        mock_db.update_request_status(req["id"], "active")
+        alert = mock_db.insert_alert(req["id"], donor["id"], 1, "simulator")
+        mock_db.update_alert_stage(alert["id"], "awaiting_confirm")
+
+        client.post(
+            "/internal/whatsapp-reply",
+            json={"phone": donor["phone"], "text": "2", "message_id": "sim-a"},
+            headers={"X-Bridge-Secret": "test-secret-12345"},
+        )
+        client.post(
+            "/internal/whatsapp-reply",
+            json={"phone": donor["phone"], "text": "2", "message_id": "sim-b"},
+            headers={"X-Bridge-Secret": "test-secret-12345"},
+        )
+        mock_post.assert_not_called()
+        assert mock_db.get_alerts_for_request(req["id"])[0]["close_sent"] is True
+        assert any(
+            entry["action"] == "conversation_close_sent"
+            and entry["entity_id"] == alert["id"]
+            for entry in mock_db.get_audit_log()
+        )
 
 class TestHealthAndBridgeStatus:
     """Tests for deployment health check."""

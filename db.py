@@ -254,6 +254,14 @@ def update_alert_showup(alert_id: int, showed_up: bool) -> dict:
     }).eq("id", alert_id).execute()
     return result.data[0] if result.data else None
 
+def update_alert_close_sent(alert_id: int, close_sent: bool = True) -> dict:
+    """Record whether the terminal conversation close has been sent."""
+    db = get_db()
+    result = db.table("alerts").update({
+        "close_sent": close_sent,
+    }).eq("id", alert_id).execute()
+    return result.data[0] if result.data else None
+
 def cancel_alerts_for_request(request_id: int) -> list:
     result = get_db().table("alerts").update({
         "stage": "done",
