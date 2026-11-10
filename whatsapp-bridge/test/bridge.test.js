@@ -166,6 +166,41 @@ test('Unresolved @lid forwards raw JID and logs the full message key', async () 
   await unlink(statePath);
 });
 
+test('Self-pair response persists the LID and sends the verification reply', async () => {
+  const statePath = `lid-self-pair-${process.pid}-${Date.now()}`;
+  const store = createStateStore(statePath);
+  await store.load();
+  const sent = [];
+  const handler = createMessageHandler({
+    socket: { sendMessage: async (jid, message) => sent.push({ jid, message }) },
+    flask: 'http://flask',
+    logger: console,
+    stateStore: store,
+    bridgeSecret: 'shared-secret',
+    fetchImpl: async () => ({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        status: 'pair_donor',
+        pair_phone: '919876543210',
+        message: 'WhatsApp verified.',
+      }),
+    }),
+  });
+
+  await handler({
+    key: { id: 'self-pair-message-1', remoteJid: '103860949528819@lid' },
+    message: { conversation: '9876543210' },
+  });
+
+  assert.strictEqual(store.getPhoneForLid('103860949528819@lid'), '919876543210');
+  assert.deepStrictEqual(sent, [{
+    jid: '103860949528819@lid',
+    message: { text: 'WhatsApp verified.' },
+  }]);
+  await unlink(statePath);
+});
+
 test('Bridge refuses to start without BRIDGE_SECRET', () => {
   assert.throws(() => requireBridgeSecret({}), /BRIDGE_SECRET is required/);
   const result = spawnSync(process.execPath, ['index.js'], {

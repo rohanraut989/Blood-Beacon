@@ -527,6 +527,10 @@ def _send_whatsapp_alert(donor, req):
     """Send the first step of the donor conversation."""
     _send_whatsapp_message(donor["phone"], _recency_message(req))
 
+_WHATSAPP_VERIFY_PROMPT = (
+    "To verify your WhatsApp, please reply with your registered mobile number."
+)
+
 # === STAGE 4 SIMULATOR ===
 
 @app.route("/request/<int:request_id>/advance", methods=["POST"])
@@ -1068,6 +1072,39 @@ def whatsapp_reply():
         )
         if not donor:
             print(f"WhatsApp reply matched no donor for sender {phone!r}")
+            if phone.endswith("@lid"):
+                typed_digits = "".join(character for character in text if character.isdigit())
+                donors = db.get_all_donors()
+                exact = [
+                    candidate for candidate in donors
+                    if "".join(character for character in str(candidate.get("phone", ""))
+                               if character.isdigit()) == typed_digits
+                ]
+                matches = exact
+                if not exact and len(typed_digits) >= 10:
+                    matches = [
+                        candidate for candidate in donors
+                        if "".join(character for character in str(candidate.get("phone", ""))
+                                   if character.isdigit()).endswith(typed_digits)
+                    ]
+                if len(matches) == 1:
+                    return {
+                        "status": "pair_donor",
+                        "pair_phone": "".join(
+                            character for character in str(matches[0]["phone"])
+                            if character.isdigit()
+                        ),
+                        "message": "WhatsApp verified. You can now reply 1 or 2 to donor alerts.",
+                    }, 200
+                if len(matches) > 1:
+                    return {
+                        "status": "pair_ambiguous",
+                        "message": (
+                            "We found more than one donor with that number. Please reply "
+                            "again including your country code (91 for India, 977 for Nepal)."
+                        ),
+                    }, 200
+                return {"status": "pair_no_match", "message": _WHATSAPP_VERIFY_PROMPT}, 200
             return {"status": "no_donor_for_phone"}, 200
         
         # Get all alerts for this donor to check for duplicate message_id

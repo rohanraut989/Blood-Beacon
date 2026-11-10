@@ -88,11 +88,21 @@ export function createMessageHandler({
     if (!text) return;
 
     try {
-      await post('/internal/whatsapp-reply', {
+      const replyResult = await post('/internal/whatsapp-reply', {
         phone: sender,
         text,
         message_id: messageId,
       });
+      if (rawJid.endsWith('@lid') && replyResult?.status === 'pair_donor') {
+        stateStore.setLidPhone(rawJid, replyResult.pair_phone);
+        await stateStore.save();
+        await socket.sendMessage(rawJid, { text: replyResult.message });
+      } else if (
+        rawJid.endsWith('@lid')
+        && ['pair_ambiguous', 'pair_no_match'].includes(replyResult?.status)
+      ) {
+        await socket.sendMessage(rawJid, { text: replyResult.message });
+      }
       console.log(`Reply from ${sender} posted to Flask`);
     } catch (error) {
       logger.error('Failed to post reply to Flask:', error?.stack || error);

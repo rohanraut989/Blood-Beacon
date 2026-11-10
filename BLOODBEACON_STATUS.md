@@ -1250,6 +1250,11 @@ The bridge also consults Baileys' LID mapping store and a persisted
 replies. If no mapping is available, the full inbound message key is logged
 before forwarding the raw JID.
 
+Unresolved LIDs can self-pair by replying with their registered mobile number:
+exact full-number matching is attempted first, then a unique suffix match for
+10-or-more typed digits. Collisions request a country code; unmatched values
+receive the registered-mobile-number prompt.
+
 ## Staff Wave Outcomes and Bridge Status
 
 Activation audit details now aggregate the planner's existing skip reasons and

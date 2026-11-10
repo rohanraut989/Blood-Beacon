@@ -67,6 +67,10 @@ The bridge will automatically detect the connection and start listening for dono
 - Persists a digits-only LID-to-phone mapping for inbound replies whose
   WhatsApp payload has no phone identity.
 
+For unresolved inbound `@lid` chats, the bridge/Flask reply flow also supports
+self-pairing from the donor's registered mobile number, including unique
+national-number suffixes and an explicit country-code prompt for collisions.
+
 ## Reliability Features
 
 1. **Message Deduplication:** Each message ID is processed exactly once. Upserts with type `notify` or `append` are both handled.

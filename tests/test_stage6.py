@@ -80,6 +80,52 @@ class TestWhatsAppReplyEndpoint:
         assert response.status_code == 200
         data = response.get_json()
         assert data.get("status") == "no_donor_for_phone"
+
+    def test_unresolved_lid_self_pair_uses_unique_suffix(self, client):
+        donor = mock_db.insert_donor(
+            name="India Donor", blood_group="O+", city="Kathmandu", area="",
+            phone="919876543210", gender="M", date_of_birth="1990-01-01", weight_kg=70
+        )
+        response = client.post(
+            "/internal/whatsapp-reply",
+            json={"phone": "103860949528819@lid", "text": "9876543210", "message_id": "pair-1"},
+            headers={"X-Bridge-Secret": "test-secret-12345"},
+        )
+        assert response.get_json()["status"] == "pair_donor"
+        assert response.get_json()["pair_phone"] == "919876543210"
+
+    def test_unresolved_lid_self_pair_collision_then_exact_country_code(self, client):
+        for phone in ("919876543210", "9779876543210"):
+            mock_db.insert_donor(
+                name=phone, blood_group="O+", city="Kathmandu", area="",
+                phone=phone, gender="M", date_of_birth="1990-01-01", weight_kg=70
+            )
+        ambiguous = client.post(
+            "/internal/whatsapp-reply",
+            json={"phone": "103860949528819@lid", "text": "9876543210", "message_id": "pair-2"},
+            headers={"X-Bridge-Secret": "test-secret-12345"},
+        )
+        assert ambiguous.get_json()["status"] == "pair_ambiguous"
+        assert "including your country code" in ambiguous.get_json()["message"]
+
+        exact = client.post(
+            "/internal/whatsapp-reply",
+            json={"phone": "103860949528819@lid", "text": "919876543210", "message_id": "pair-3"},
+            headers={"X-Bridge-Secret": "test-secret-12345"},
+        )
+        assert exact.get_json()["status"] == "pair_donor"
+        assert exact.get_json()["pair_phone"] == "919876543210"
+
+    def test_unresolved_lid_self_pair_no_match_uses_mobile_prompt(self, client):
+        response = client.post(
+            "/internal/whatsapp-reply",
+            json={"phone": "103860949528819@lid", "text": "12345", "message_id": "pair-4"},
+            headers={"X-Bridge-Secret": "test-secret-12345"},
+        )
+        assert response.get_json()["status"] == "pair_no_match"
+        assert response.get_json()["message"] == (
+            "To verify your WhatsApp, please reply with your registered mobile number."
+        )
     
     @patch("app.requests.post")
     def test_reply_confirmed_updates_alert(self, mock_post, client):
