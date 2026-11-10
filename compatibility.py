@@ -19,19 +19,22 @@ RED_CELL_COMPATIBILITY = {
     "AB-": {"AB+", "AB-"},
 }
 
-# Plasma compatibility matrix (inverted logic for ABO, but Rh factor same direction)
-# AB is universal plasma donor (no A or B antigens)
-# O is also universal plasma donor (no A or B antigens)
+# Plasma compatibility matrix (INVERSE from RBC: based on donor plasma antibodies)
+# NOTE: Rh factor DOES NOT matter for plasma transfusions
+# AB plasma (no A/B antibodies): can go to ALL recipients (all Rh)
+# A plasma (has B antibodies): can go to A and O recipients (all Rh)
+# B plasma (has A antibodies): can go to B and O recipients (all Rh)
+# O plasma (has A/B antibodies): can go to O recipients ONLY (all Rh)
 # Key: donor blood group → set of recipient blood groups that can receive this plasma
 PLASMA_COMPATIBILITY = {
-    "AB+": {"O+", "A+", "B+", "AB+"},
-    "AB-": {"O-", "A-", "B-", "AB-", "O+", "A+", "B+", "AB+"},  # AB- can donate to Rh+ too
-    "A+": {"A+", "AB+"},
-    "A-": {"A-", "AB-", "A+", "AB+"},  # A- can donate to Rh+ too
-    "B+": {"B+", "AB+"},
-    "B-": {"B-", "AB-", "B+", "AB+"},  # B- can donate to Rh+ too
-    "O+": {"O+", "A+", "B+", "AB+"},   # Universal for ABO, but Rh+ only
-    "O-": {"O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"},  # Universal plasma donor
+    "AB+": {"O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"},  # AB to all (Rh-agnostic)
+    "AB-": {"O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"},  # AB to all (Rh-agnostic)
+    "A+": {"A+", "A-", "O+", "O-"},                               # A plasma to A and O
+    "A-": {"A+", "A-", "O+", "O-"},                               # A plasma to A and O
+    "B+": {"B+", "B-", "O+", "O-"},                               # B plasma to B and O
+    "B-": {"B+", "B-", "O+", "O-"},                               # B plasma to B and O
+    "O+": {"O+", "O-"},                                           # O to O only
+    "O-": {"O+", "O-"},                                           # O to O only
 }
 
 # Platelet compatibility (v1 — using whole-blood matrix)

@@ -90,8 +90,12 @@
      - O+ only donates to Rh+ recipients
      - AB+ is universal recipient (receives from all Rh+)
      - AB- receives from all Rh- only
-   - **Plasma compatibility:** AB and O are universal plasma donors (lack A/B antigens)
-     - Rh factor still applies (Rh- recipients only receive from Rh- plasma)
+   - **Plasma compatibility (Stage 2.1 CORRECTION):** Based on donor plasma ANTIBODIES, NOT ABO blood type
+     - AB plasma: no A/B antibodies → can go to ALL recipients (Rh-agnostic)
+     - A plasma: has B antibodies → can go to A and O recipients ONLY (Rh-agnostic)
+     - B plasma: has A antibodies → can go to B and O recipients ONLY (Rh-agnostic)
+     - O plasma: has A/B antibodies → can go to O recipients ONLY (Rh-agnostic)
+     - **Rh factor does NOT matter for plasma** (corrected from initial Stage 2 implementation)
    - **Platelet compatibility:** v1 uses whole-blood matrix (TODO-verify: real platelets need cross-matching)
    - Functions:
      - `compatible_donor_groups(recipient_group, component)` → set of compatible donor groups
@@ -122,10 +126,16 @@
    - Added `get_donors_by_city(city)` function
    - Added to mock_db for testing
 
-6. **Tests (`tests/test_stage2.py`)**
-   - 21 comprehensive tests:
-     - **Eligibility tests (9):** no donations, 60-day man deferred, 130-day woman eligible, age limits, weight limits, multiple deferrals
-     - **Compatibility tests (10):** O- universal donor, AB+ universal recipient, Rh factor logic, plasma compatibility
+6. **Eligibility Enhancement (Stage 2.1)**
+   - Fixed `eligible_on` hygiene:
+     - Time-based deferrals (age < 18, donation gap): `eligible_on` = specific date
+     - Permanent conditions (weight < 45kg, age > 65): `eligible_on` = None
+   - Added tests for eligible_on correctness
+
+7. **Tests (`tests/test_stage2.py`)**
+   - 27 comprehensive tests (expanded in Stage 2.1):
+     - **Eligibility tests (12):** no donations, 60-day man deferred, 130-day woman eligible, age limits, weight limits, multiple deferrals, eligible_on hygiene
+     - **Compatibility tests (13):** O- universal donor, AB+ universal recipient, Rh factor logic, plasma compatibility (corrected), full RBC table verification
      - **Integration test (1):** B+ request with O+/O- donors showing both as eligible/compatible
      - **Backward-compatibility test (1):** Confirms all Stage 1 blood groups still work
 
@@ -134,10 +144,10 @@
 **New files:**
 ```
 BloodBeacon/
-├── eligibility.py            # Eligibility assessment engine (140 lines)
-├── compatibility.py          # Blood-type compatibility matrices (147 lines)
+├── eligibility.py            # Eligibility assessment engine (130+ lines)
+├── compatibility.py          # Blood-type compatibility matrices (corrected plasma)
 └── tests/
-    └── test_stage2.py        # 21 Stage 2 tests (387 lines)
+    └── test_stage2.py        # 27 Stage 2 tests (expanded in Stage 2.1)
 ```
 
 **Modified files:**
@@ -152,18 +162,18 @@ BloodBeacon/
     └── mock_db.py            # Added get_donors_by_city()
 ```
 
-### Test Results
+### Test Results (Stage 2.1)
 
 **Run tests:**
 ```bash
 source venv/bin/activate
-pytest tests/test_stage1.py tests/test_stage2.py -v
+pytest tests/ -v
 ```
 
 **Results:** 
 - ✅ 18 Stage 1 tests PASSING
-- ✅ 21 Stage 2 tests PASSING
-- **Total: 39 tests PASSING**
+- ✅ 27 Stage 2 tests PASSING (expanded with corrections)
+- **Total: 45 tests PASSING**
 
 ### Key Technical Decisions
 
@@ -274,6 +284,57 @@ When you have Supabase credentials:
 3. Run schema.sql in the Supabase SQL editor (copy-paste entire file)
 4. Optionally seed: `python seed.py` (requires credentials)
 
+---
+
+### Stage 2.1: Medical Matrix Corrections + Hygiene
+
+**Objective:** Verify and correct blood-type compatibility matrices, fix eligible_on hygiene, add comprehensive tests.
+
+**Status:** ✅ COMPLETE (45 tests passing, all corrections verified)
+
+**Corrections Made:**
+
+1. **Red-Cell Matrix Verification**
+   - ✅ Full 8×8 matrix verified against canonical transfusion chart
+   - ✅ Added `test_red_cell_compatibility_full_table()` with source citation
+   - All 8 blood groups correct (O-, O+, A-, A+, B-, B+, AB-, AB+)
+
+2. **Plasma Matrix Correction**
+   - ✗ Initial Stage 2 plasma logic was WRONG (used Rh factor; treated O as universal)
+   - ✅ **CORRECTED to:** Based on donor plasma ANTIBODIES, not ABO blood type
+   - ✅ **Rh factor does NOT matter for plasma** (critical correction)
+   - AB plasma → all recipients (universal, Rh-agnostic)
+   - A plasma → A and O recipients ONLY (Rh-agnostic)
+   - B plasma → B and O recipients ONLY (Rh-agnostic)
+   - O plasma → O recipients ONLY (Rh-agnostic)
+   - Edge case verified: "AB- plasma can go to O+" ✓, "O plasma cannot go to A" ✓
+
+3. **Eligible_On Hygiene**
+   - ✓ Time-based deferrals: eligible_on = specific date (18th birthday, donation gap date)
+   - ✓ Permanent conditions: eligible_on = None (weight, age > 65)
+   - ✓ Added tests verifying both cases
+
+4. **Platelet Compatibility**
+   - ✓ Unchanged: v1 uses whole-blood matrix with TODO-verify marker
+
+**Test Expansion:**
+- Stage 2: 21 tests → Stage 2.1: 27 tests
+- Added: `test_eligible_on_is_date_for_time_based_deferrals`
+- Added: `test_eligible_on_is_none_for_weight_deferral`
+- Added: `test_eligible_on_is_none_for_over_65_deferral`
+- Added: `test_red_cell_compatibility_full_table`
+- Updated: `test_AB_positive_plasma_compatibility` (now Rh-agnostic)
+- Added: `test_O_plasma_not_universal`
+- Added: `test_A_plasma_compatibility`
+- Added: `test_B_plasma_compatibility`
+
+**All Previous Tests Passing:**
+- Stage 1 tests: 18/18 passing ✓
+- Stage 2 tests: 27/27 passing ✓
+- **Total: 45/45 passing** ✓
+
+---
+
 ### Next Stage (Stage 3)
 
 - **Staff activation workflow** — Mark requests as active, trigger donor alerts
@@ -292,11 +353,13 @@ When you have Supabase credentials:
 
 ### Blockers / Issues
 
-None. All Stage 1 + Stage 2 objectives complete and all 39 tests passing.
+None. All Stage 1 + Stage 2 + Stage 2.1 objectives complete and all 45 tests passing.
 
 ---
 
 **Last Updated:** 2024-11-10  
-**Stages Complete:** Stage 1 ✅, Stage 2 ✅
-**Total Tests:** 39 passing  
-**Commit Message:** `Stage 2: eligibility + compatibility engines, match preview upgrade`
+**Stages Complete:** Stage 1 ✅, Stage 2 ✅, Stage 2.1 (Corrections) ✅
+**Total Tests:** 45 passing  
+**Commits:**
+  - Stage 2: `eligibility + compatibility engines, match preview upgrade`
+  - Stage 2.1: `plasma matrix correction + RBC table test`

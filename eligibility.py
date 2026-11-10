@@ -45,9 +45,14 @@ def assess_donor(donor, donations, rules, today):
     
     if age < age_min:
         eligible = False
+        # eligible_on is the 18th birthday (time-based deferral)
+        eighteenth_birthday = dob.replace(year=dob.year + age_min)
+        eligible_on = eighteenth_birthday
         reasons.append(f"Age {age} is below minimum {age_min} years")
     elif age > age_max:
         eligible = False
+        # Age over maximum: no eligible_on date (permanent condition)
+        eligible_on = None
         reasons.append(f"Age {age} exceeds maximum {age_max} years")
     
     # === 2. WEIGHT CHECK ===
@@ -56,6 +61,8 @@ def assess_donor(donor, donations, rules, today):
     
     if weight_kg < weight_min_kg:
         eligible = False
+        # Weight: no eligible_on date (condition, not time-based)
+        # Note: eligibility_on remains None unless a time-based deferral already set it
         reasons.append(f"Weight {weight_kg}kg is below minimum {weight_min_kg}kg")
     
     # === 3. DONATION GAP CHECK ===

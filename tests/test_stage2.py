@@ -238,6 +238,65 @@ class TestEligibilityEngine:
         assert result["status"] == "deferred"
         assert result["eligible_on"] is not None
         assert "120 days" in result["reasons"][0] or "days required for women" in result["reasons"][0]
+    
+    def test_eligible_on_is_date_for_time_based_deferrals(self):
+        """eligible_on should be a DATE for time-based deferrals (age, donation gap)."""
+        # Age deferral: should have eligible_on as 18th birthday
+        today = date(2024, 11, 10)
+        dob = date(2010, 3, 15)  # Age 14
+        
+        donor = {
+            "id": 1,
+            "name": "Young Donor",
+            "blood_group": "O+",
+            "gender": "Male",
+            "date_of_birth": dob,
+            "weight_kg": 70.0,
+        }
+        
+        result = eligibility.assess_donor(donor, [], self.get_rules(), today)
+        assert result["status"] == "deferred"
+        assert result["eligible_on"] is not None
+        assert isinstance(result["eligible_on"], date)
+        assert result["eligible_on"] == date(2028, 3, 15)  # 18th birthday
+    
+    def test_eligible_on_is_none_for_weight_deferral(self):
+        """eligible_on should be None for weight deferral (permanent condition)."""
+        today = date(2024, 11, 10)
+        dob = date(1990, 5, 15)  # Age 34
+        
+        donor = {
+            "id": 1,
+            "name": "Light Donor",
+            "blood_group": "O+",
+            "gender": "Male",
+            "date_of_birth": dob,
+            "weight_kg": 40.0,  # Below minimum 45kg
+        }
+        
+        result = eligibility.assess_donor(donor, [], self.get_rules(), today)
+        assert result["status"] == "deferred"
+        assert "Weight" in result["reasons"][0]
+        assert result["eligible_on"] is None  # No eligible_on for weight
+    
+    def test_eligible_on_is_none_for_over_65_deferral(self):
+        """eligible_on should be None for age > 65 deferral (permanent condition)."""
+        today = date(2024, 11, 10)
+        dob = date(1940, 5, 15)  # Age 84
+        
+        donor = {
+            "id": 1,
+            "name": "Elderly Donor",
+            "blood_group": "O+",
+            "gender": "Male",
+            "date_of_birth": dob,
+            "weight_kg": 70.0,
+        }
+        
+        result = eligibility.assess_donor(donor, [], self.get_rules(), today)
+        assert result["status"] == "deferred"
+        assert "exceeds maximum" in result["reasons"][0]
+        assert result["eligible_on"] is None  # No eligible_on for age > max
 
 
 class TestCompatibilityEngine:
@@ -284,21 +343,54 @@ class TestCompatibilityEngine:
         assert compatibility.is_compatible("O-", "O-", "whole_blood")
     
     def test_AB_positive_plasma_compatibility(self):
-        """AB is universal plasma donor. AB can donate plasma to all with matching Rh."""
-        # AB+ can donate plasma to all Rh+ recipients
-        compatible_rh_plus = compatibility.compatible_donor_groups("O+", "plasma")
-        assert "AB+" in compatible_rh_plus
-        # AB- can donate plasma to all recipients (universal plasma donor)
-        compatible_rh_minus = compatibility.compatible_donor_groups("O-", "plasma")
-        assert "AB-" in compatible_rh_minus
-        # But AB+ cannot donate to Rh- (Rh factor matters for plasma)
-        assert "AB+" not in compatible_rh_minus
+        """AB plasma is universal (no A/B antigens). Rh-agnostic."""
+        # AB+ can donate plasma to ALL recipients (A, B, O, AB; any Rh)
+        recipients_for_ab_plus = compatibility.compatible_donor_groups("A+", "plasma")
+        assert "AB+" in recipients_for_ab_plus
+        recipients_for_o_minus = compatibility.compatible_donor_groups("O-", "plasma")
+        assert "AB+" in recipients_for_o_minus
+        recipients_for_b_minus = compatibility.compatible_donor_groups("B-", "plasma")
+        assert "AB+" in recipients_for_b_minus
     
-    def test_O_negative_plasma_compatibility(self):
-        """O- is also universal plasma donor."""
-        for group in compatibility.get_all_blood_groups():
-            compatible = compatibility.compatible_donor_groups(group, "plasma")
-            assert "O-" in compatible, f"O- should be compatible with {group} for plasma"
+    def test_O_plasma_not_universal(self):
+        """O plasma can ONLY go to O recipients (has A and B antibodies)."""
+        # O can only donate to O (not A, not B, not AB)
+        assert "O-" in compatibility.compatible_donor_groups("O+", "plasma")
+        assert "O-" in compatibility.compatible_donor_groups("O-", "plasma")
+        assert "O+" in compatibility.compatible_donor_groups("O-", "plasma")  # O- plasma to O+
+        
+        # O cannot donate to A, B, or AB
+        assert "O+" not in compatibility.compatible_donor_groups("A+", "plasma")
+        assert "O-" not in compatibility.compatible_donor_groups("B+", "plasma")
+        assert "O+" not in compatibility.compatible_donor_groups("AB-", "plasma")
+    
+    def test_A_plasma_compatibility(self):
+        """A plasma can go to A and O (no B antibodies in A plasma)."""
+        # A plasma to A recipients
+        assert "A+" in compatibility.compatible_donor_groups("A+", "plasma")
+        assert "A-" in compatibility.compatible_donor_groups("A-", "plasma")
+        
+        # A plasma to O recipients
+        assert "A+" in compatibility.compatible_donor_groups("O+", "plasma")
+        assert "A-" in compatibility.compatible_donor_groups("O-", "plasma")
+        
+        # A plasma NOT to B or AB
+        assert "A+" not in compatibility.compatible_donor_groups("B+", "plasma")
+        assert "A-" not in compatibility.compatible_donor_groups("AB-", "plasma")
+    
+    def test_B_plasma_compatibility(self):
+        """B plasma can go to B and O (no A antibodies in B plasma)."""
+        # B plasma to B recipients
+        assert "B+" in compatibility.compatible_donor_groups("B+", "plasma")
+        assert "B-" in compatibility.compatible_donor_groups("B-", "plasma")
+        
+        # B plasma to O recipients
+        assert "B+" in compatibility.compatible_donor_groups("O+", "plasma")
+        assert "B-" in compatibility.compatible_donor_groups("O-", "plasma")
+        
+        # B plasma NOT to A or AB
+        assert "B+" not in compatibility.compatible_donor_groups("A+", "plasma")
+        assert "B-" not in compatibility.compatible_donor_groups("AB-", "plasma")
     
     def test_all_blood_groups_have_compatibility(self):
         """All 8 blood groups should have defined compatibility."""
@@ -313,6 +405,46 @@ class TestCompatibilityEngine:
                 compatibility.is_compatible(donor, group, "whole_blood")
                 for donor in all_groups
             )
+    
+    def test_red_cell_compatibility_full_table(self):
+        """Verify the entire red-cell compatibility matrix against canonical chart.
+        
+        Source: Standard blood transfusion compatibility (ABO + Rh system)
+        - O- is universal donor (can donate to all 8 types)
+        - AB+ is universal recipient (receives from all 8 types)
+        - ABO compatibility: O→all, A→A/AB, B→B/AB, AB→AB only
+        - Rh compatibility: Rh- can only receive from Rh-; Rh+ can receive from both
+        
+        Test verifies: for each DONOR, all recipients in the matrix can receive from that donor.
+        """
+        # Canonical red-cell chart: donor -> {recipients}
+        canonical = {
+            "O-": {"O-", "O+", "A-", "A+", "B-", "B+", "AB-", "AB+"},  # Universal
+            "O+": {"O+", "A+", "B+", "AB+"},  # O to Rh+ only
+            "A-": {"A-", "A+", "AB-", "AB+"},  # A to Rh- and Rh+
+            "A+": {"A+", "AB+"},  # A to Rh+ only
+            "B-": {"B-", "B+", "AB-", "AB+"},  # B to Rh- and Rh+
+            "B+": {"B+", "AB+"},  # B to Rh+ only
+            "AB-": {"AB-", "AB+"},  # AB to Rh- and Rh+
+            "AB+": {"AB+"},  # AB to Rh+ only
+        }
+        
+        # Verify each donor's recipients
+        for donor in sorted(canonical.keys()):
+            expected_recipients = canonical[donor]
+            # For each recipient in expected, verify donor can donate to it
+            for recipient in expected_recipients:
+                actual_donors = compatibility.compatible_donor_groups(recipient, "whole_blood")
+                assert donor in actual_donors, \
+                    f"Mismatch: {donor} should be able to donate to {recipient}"
+            
+            # Also verify donors NOT in expected cannot donate
+            all_groups = compatibility.get_all_blood_groups()
+            not_expected = set(all_groups) - expected_recipients
+            for non_recipient in not_expected:
+                actual_donors = compatibility.compatible_donor_groups(non_recipient, "whole_blood")
+                assert donor not in actual_donors, \
+                    f"Mismatch: {donor} should NOT be able to donate to {non_recipient}"
     
     def test_platelets_uses_whole_blood_matrix_v1(self):
         """v1 platelets use whole-blood compatibility matrix (TODO-verify)."""
