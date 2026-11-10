@@ -69,6 +69,12 @@ def get_donors_by_group_and_city(blood_group: str, city: str) -> list:
     result = db.table("donors").select("*").eq("blood_group", blood_group).eq("city", city).execute()
     return result.data if result.data else []
 
+def get_donors_by_city(city: str) -> list:
+    """Get all donors in a city."""
+    db = get_db()
+    result = db.table("donors").select("*").eq("city", city).execute()
+    return result.data if result.data else []
+
 # === REQUESTS ===
 
 def insert_request(patient_name: str, blood_group: str, component: str,

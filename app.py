@@ -7,6 +7,8 @@ import os
 from datetime import datetime
 from flask import Flask, render_template, request, redirect, url_for, flash
 import db
+import eligibility
+import compatibility
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
@@ -141,7 +143,7 @@ def request_status(request_id):
 
 @app.route("/match/<int:request_id>")
 def match_preview(request_id):
-    """Stage 1 match preview: exact blood group in same city only."""
+    """Stage 2 match preview: includes eligibility and compatibility checks."""
     if not db.is_db_configured():
         flash("Database not configured.", "error")
         return redirect(url_for("home"))
@@ -151,10 +153,53 @@ def match_preview(request_id):
         flash("Request not found.", "error")
         return redirect(url_for("home"))
 
-    # Get donors with exact blood group in same city
-    donors = db.get_donors_by_group_and_city(req["blood_group"], req["city"])
+    # Get all donors in the same city
+    all_donors = db.get_donors_by_city(req["city"])
+    
+    # Get rules for eligibility assessment
+    rules_list = db.get_all_rules()
+    rules_dict = {r["key"]: r["value"] for r in rules_list}
+    
+    # Assess and categorize donors
+    today = datetime.now().date()
+    eligible_donors = []
+    deferred_donors = []
+    
+    for donor in all_donors:
+        # Check blood type compatibility
+        if not compatibility.is_compatible(donor["blood_group"], req["blood_group"], req["component"]):
+            continue
+        
+        # Get donor's donation history
+        donations = db.get_donations_for_donor(donor["id"])
+        
+        # Assess eligibility
+        assessment = eligibility.assess_donor(donor, donations, rules_dict, today)
+        
+        donor_info = dict(donor)
+        donor_info["eligibility_status"] = assessment["status"]
+        donor_info["eligible_on"] = assessment.get("eligible_on")
+        donor_info["reasons"] = assessment.get("reasons", [])
+        
+        if assessment["status"] == "eligible":
+            eligible_donors.append(donor_info)
+        else:
+            deferred_donors.append(donor_info)
+    
+    # Sort eligible donors: exact group first, then compatible
+    def sort_key(d):
+        exact_match = 0 if d["blood_group"] == req["blood_group"] else 1
+        return (exact_match, d["area"] if d.get("area") else "")
+    
+    eligible_donors.sort(key=sort_key)
 
-    return render_template("match_preview.html", request=req, donors=donors, stage="Stage 1")
+    return render_template(
+        "match_preview.html",
+        request=req,
+        eligible_donors=eligible_donors,
+        deferred_donors=deferred_donors,
+        stage="Stage 2"
+    )
 
 # === STAFF ===
 

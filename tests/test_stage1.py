@@ -168,8 +168,8 @@ class TestRequestBlood:
 class TestMatchPreview:
     """Tests for Stage 1 match preview."""
     
-    def test_exact_match_for_blood_group_and_city(self, client):
-        """Test that match preview returns only exact blood group matches in the same city."""
+    def test_match_preview_shows_compatible_donors(self, client):
+        """Test that match preview shows compatible donors and filters by city."""
         # Setup: Create a B+ request in Tiruchirappalli
         req = mock_db.insert_request(
             patient_name="Test Patient",
@@ -209,18 +209,18 @@ class TestMatchPreview:
         response = client.get(f"/match/{req['id']}")
         assert response.status_code == 200
         
-        # Should include B+ donors from Tiruchirappalli
+        # Should include exact B+ match donors from Tiruchirappalli
         assert b"B+ Donor 1" in response.data
         assert b"B+ Donor 2" in response.data
         
-        # Should NOT include O+ donor (different blood group)
-        assert b"O+ Donor" not in response.data
+        # Should include O+ donor (compatible: O+ can donate to B+)
+        assert b"O+ Donor" in response.data
         
         # Should NOT include B+ from Chennai (different city)
         assert b"B+ Chennai" not in response.data or b"Mylapore" not in response.data
     
-    def test_match_preview_has_stage_1_warning(self, client):
-        """Test that match preview shows Stage 1 limitation warning."""
+    def test_match_preview_has_stage_2_checks(self, client):
+        """Test that match preview shows Stage 2 eligibility and compatibility checks."""
         req = mock_db.insert_request(
             patient_name="Test Patient",
             blood_group="A+",
@@ -235,8 +235,9 @@ class TestMatchPreview:
         
         response = client.get(f"/match/{req['id']}")
         assert response.status_code == 200
-        assert b"Stage 1" in response.data
-        assert b"Eligibility" in response.data
+        assert b"Stage 2" in response.data
+        # Template shows "ELIGIBLE" status and "eligibility + compatibility" info
+        assert b"Stage 2 Active" in response.data or b"eligibility checks" in response.data
 
 class TestPageNavigation:
     """Tests for basic page navigation."""

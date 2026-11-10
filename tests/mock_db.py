@@ -56,6 +56,9 @@ def get_donor(donor_id):
 def get_donors_by_group_and_city(blood_group, city):
     return [d for d in _test_donors.values() if d["blood_group"] == blood_group and d["city"] == city]
 
+def get_donors_by_city(city):
+    return [d for d in _test_donors.values() if d["city"] == city]
+
 # === REQUESTS ===
 
 def insert_request(patient_name, blood_group, component, units, hospital_name, city, needed_by, contact_phone, created_by):
