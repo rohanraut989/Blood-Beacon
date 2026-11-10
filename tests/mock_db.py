@@ -14,12 +14,13 @@ _id_counter = {"donors": 0, "donations": 0, "requests": 0, "rules": 0, "audit_lo
 
 def reset():
     """Clear all test data."""
-    global _test_donors, _test_donations, _test_requests, _test_rules, _test_audit_log, _id_counter
+    global _test_donors, _test_donations, _test_requests, _test_rules, _test_audit_log, _test_alerts, _id_counter
     _test_donors = {}
     _test_donations = {}
     _test_requests = {}
     _test_rules = {}
     _test_audit_log = {}
+    _test_alerts = {}
     _id_counter = {"donors": 0, "donations": 0, "requests": 0, "rules": 0, "audit_log": 0}
 
 def is_db_configured():
@@ -162,8 +163,8 @@ def get_audit_log():
 # === ALERTS (Stage 3+) ===
 
 def get_alerts_for_donor(donor_id):
-    """Get all alerts for a donor (returns empty list if no alerts table)."""
-    return []  # Mock: no alert history yet
+    """Get all alerts for a donor."""
+    return [a for a in _test_alerts.values() if a["donor_id"] == donor_id]
 
 # === ALERTS (Stage 4+) ===
 
@@ -191,11 +192,13 @@ def get_alerts_for_request(request_id):
     """Get all alerts for a request."""
     return [a for a in _test_alerts.values() if a["request_id"] == request_id]
 
-def update_alert_reply(alert_id, reply):
+def update_alert_reply(alert_id, reply, message_id=None):
     """Update an alert with a donor's reply."""
     if alert_id in _test_alerts:
         _test_alerts[alert_id]["reply"] = reply
         _test_alerts[alert_id]["replied_at"] = "2024-01-01T00:00:00Z"
+        if message_id:
+            _test_alerts[alert_id]["message_id"] = message_id
         return _test_alerts[alert_id]
     return None
 

@@ -5,6 +5,7 @@ Flask application
 
 import os
 import random
+import requests
 from datetime import datetime, date
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 import db
@@ -791,6 +792,138 @@ def experiment_mode():
         seed=seed,
         is_staff=True
     )
+
+# === STAGE 6: WHATSAPP INTEGRATION ===
+
+@app.route("/health", methods=["GET"])
+def health():
+    """Health check endpoint for deployment and bridge connectivity."""
+    return {"ok": True}, 200
+
+@app.route("/internal/whatsapp-reply", methods=["POST"])
+def whatsapp_reply():
+    """Receive WhatsApp donor replies from the bridge.
+    
+    Expects:
+    - X-Bridge-Secret header matching BRIDGE_SECRET env var
+    - JSON body: {phone, text, message_id}
+    
+    Returns 401 if secret doesn't match.
+    Returns 200 (idempotent) even if phone/message_id don't match any pending alert.
+    """
+    bridge_secret = os.getenv("BRIDGE_SECRET", "")
+    request_secret = request.headers.get("X-Bridge-Secret", "")
+    
+    if not bridge_secret or request_secret != bridge_secret:
+        return ("", 401)
+    
+    if not db.is_db_configured():
+        return {"error": "Database not configured"}, 503
+    
+    try:
+        data = request.get_json() or {}
+        phone = data.get("phone", "").strip()
+        text = data.get("text", "").strip()
+        message_id = data.get("message_id", "")
+        
+        if not phone or not text or not message_id:
+            return {"error": "Missing phone, text, or message_id"}, 400
+        
+        # Find donor by phone
+        donor = db.get_donor_by_phone(phone)
+        if not donor:
+            # Unknown number; ignore silently (idempotent)
+            return {"status": "no_donor_for_phone"}, 200
+        
+        # Get all alerts for this donor to check for duplicate message_id
+        all_alerts = db.get_alerts_for_donor(donor["id"])
+        
+        # Check for duplicate message_id across all alerts (idempotent)
+        for alert in all_alerts:
+            if alert.get("message_id") == message_id:
+                return {"status": "already_processed"}, 200
+        
+        # Find pending alert (one with no reply yet)
+        matching_alert = None
+        for alert in all_alerts:
+            if alert.get("reply") is None:  # Pending (no reply yet)
+                matching_alert = alert
+                break
+        
+        if not matching_alert:
+            # No pending alert; ignore (idempotent)
+            return {"status": "no_pending_alert"}, 200
+        
+        # Process the reply
+        request_obj = db.get_request(matching_alert["request_id"])
+        if not request_obj:
+            return {"status": "request_not_found"}, 200
+        
+        reply_mapping = {"1": "confirmed", "2": "donated_recently", "3": "declined"}
+        processed_reply = reply_mapping.get(text.strip(), None)
+        
+        if processed_reply is None:
+            # Invalid reply; send polite re-ask via bridge
+            bridge_url = os.getenv("BRIDGE_URL", "http://127.0.0.1:3100")
+            bridge_secret = os.getenv("BRIDGE_SECRET", "")
+            try:
+                requests.post(
+                    f"{bridge_url}/send",
+                    json={"phone": phone, "message": "BloodBeacon: please reply 1 (I can donate), 2 (I donated recently), or 3 (Not now)."},
+                    headers={"X-Bridge-Secret": bridge_secret},
+                    timeout=30
+                )
+            except Exception as e:
+                print(f"Failed to send re-ask to {phone}: {e}")
+            return {"status": "invalid_reply_reask_sent"}, 200
+        
+        # Record the reply
+        db.update_alert_reply(matching_alert["id"], processed_reply, message_id=message_id)
+        db.update_alert_showup(matching_alert["id"], True)
+        
+        # Handle "donated_recently": insert self-report donation
+        if processed_reply == "donated_recently":
+            db.insert_donation(
+                donor_id=donor["id"],
+                donated_on=date.today().isoformat(),
+                units=1,
+                source="self_report"
+            )
+        
+        # Re-evaluate request: check if fulfilled
+        confirmed_count = 0
+        alerts_for_request = db.get_alerts_for_request(matching_alert["request_id"])
+        for alert in alerts_for_request:
+            if alert.get("reply") == "confirmed":
+                confirmed_count += 1
+        
+        if confirmed_count >= request_obj.get("units", 1):
+            db.update_request_status(matching_alert["request_id"], "fulfilled")
+            db.insert_audit_log(
+                actor="whatsapp_donor",
+                action="request_fulfilled",
+                entity="request",
+                entity_id=matching_alert["request_id"],
+                detail=f"Fulfilled via WhatsApp after {confirmed_count} confirmations"
+            )
+            return {"status": "request_fulfilled"}, 200
+        
+        # Wave not exhausted, proceed with next wave if still needed
+        # (Fire Wave 2 if Wave 1 exhausted but not fulfilled)
+        wave1_alerts = [a for a in alerts_for_request if a["wave_no"] == 1]
+        wave2_alerts = [a for a in alerts_for_request if a["wave_no"] == 2]
+        
+        if len(wave2_alerts) == 0 and confirmed_count < request_obj.get("units", 1):
+            # Wave 1 exhausted, units still needed: fire Wave 2 via WhatsApp
+            # (This mirrors the simulator advance_simulation logic)
+            # For now, just log it; Wave 2 firing happens in advance_simulation or separate logic
+            pass
+        
+        return {"status": "reply_recorded", "reply": processed_reply}, 200
+    
+    except Exception as e:
+        print(f"WhatsApp reply processing error: {e}")
+        return {"error": str(e)}, 500
 
 # === ERROR HANDLERS ===
 

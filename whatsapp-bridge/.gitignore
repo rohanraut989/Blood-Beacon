@@ -1,0 +1,7 @@
+node_modules/
+.baileys_auth/
+.wwebjs_auth/
+.wwebjs_cache/
+bridge-state.json
+*.log
+.DS_Store

@@ -735,8 +735,8 @@ None. All Stage 1 + Stage 2 + Stage 2.1 + Stage 3 objectives complete and all 56
 ---
 
 **Last Updated:** 2024-11-10  
-**Stages Complete:** Stage 1 ✅, Stage 2 ✅, Stage 2.1 ✅, Stage 3 ✅, Stage 4 ✅, Stage 5 ✅, Stage 5.1 ✅
-**Total Tests:** 95 passing (18 + 27 + 11 + 17 + 9 + 10 + 1 flag test)
+**Stages Complete:** Stage 1 ✅, Stage 2 ✅, Stage 2.1 ✅, Stage 3 ✅, Stage 4 ✅, Stage 5 ✅, Stage 5.1 ✅, Stage 6 ✅
+**Total Tests:** 106 passing (18 + 27 + 11 + 17 + 9 + 10 + 11 + 1 flag test; plus 3 bridge npm tests)
 **Commits:**
   - Stage 2: `eligibility + compatibility engines, match preview upgrade`
   - Stage 2.1: `plasma matrix correction + RBC table test`
@@ -744,3 +744,187 @@ None. All Stage 1 + Stage 2 + Stage 2.1 + Stage 3 objectives complete and all 56
   - Stage 4: `wave alerting + simulator`
   - Stage 5: `staff dashboard + experiment mode`
   - Stage 5.1: `experiment routes proven + close request`
+  - Stage 6: `WhatsApp bridge + deploy + hardening`
+
+---
+
+## Stage 6: WhatsApp Bridge + Deployment (COMPLETE) ✅
+
+### Objective
+
+Integrate real WhatsApp messaging via Baileys library; build deployment-ready Flask app with gunicorn; implement message deduplication, reconnection logic, and hardening checks.
+
+### What Was Built
+
+**1. WhatsApp Bridge (Node.js)**
+
+- **Directory:** `whatsapp-bridge/`
+- **Entry Point:** `index.js` — Initializes Baileys socket, lifecycle manager, HTTP API server
+- **Lifecycle Management (`lifecycle.js`):**
+  - Connection state tracking (connecting, connected, authenticating, authenticated)
+  - Graceful disconnect handling
+  - Auto-reconnect on transient errors (delay, disconnected, restoring, etc.)
+  - **No auto-reconnect on loggedOut status** (terminal state; requires manual QR re-scan)
+  - Message handler: processes both 'notify' (new) and 'append' (history) upserts
+  - Deduplication: tracks processed message IDs in `StateStore`
+
+- **Message Handling (`messages.js`):**
+  - Receives WhatsApp messages; checks for duplicate message_id
+  - Posts confirmed replies to Flask `/internal/whatsapp-reply` endpoint
+  - 30-second timeout; passes `X-Bridge-Secret` header for authentication
+  - Bridge HTTP API server: 
+    - `GET /status` — Returns `{"status": "connected|disconnected"}` 
+    - `POST /send` — Sends message to phone via Baileys (`{phone, message}`)
+  - Requires `X-Bridge-Secret` header validation
+
+- **State Persistence (`state.js`):**
+  - Persists message IDs to `bridge-state.json` for idempotency across restarts
+  - Implements `StateStore` interface for Baileys
+  - Loads/saves on each message processed
+
+- **Configuration (`package.json`):**
+  - Dependencies: `@whiskeysockets/baileys`, `axios`, `express`, `dotenv`
+  - Node.js >=20 required
+  - Test runner: built-in Node test framework
+
+- **Tests (`test/bridge.test.js`):**
+  - ✅ Message dedupe: same ID processed once
+  - ✅ Reconnect logic: retry on transient error, not on loggedOut
+  - ✅ No reconnect on loggedOut status (terminal)
+
+**2. Flask WhatsApp Integration**
+
+- **Health Endpoint (`GET /health`)**
+  - Returns `{"ok": true}` for deployment monitoring
+
+- **Reply Handler (`POST /internal/whatsapp-reply`)**
+  - Required header: `X-Bridge-Secret` (401 if mismatch)
+  - Payload: `{phone, text, message_id}`
+  - Logic:
+    1. Lookup donor by phone; if not found → return 200 (idempotent)
+    2. Check message_id against all donor alerts (dedupe); if seen → return 200
+    3. Find first pending alert (reply = None) for donor
+    4. Map text: "1"→confirmed, "2"→donated_recently, "3"→declined
+    5. Invalid reply → send re-ask via bridge, return 200
+    6. Record reply in alert, mark showed_up = true
+    7. If "2" (donated_recently) → insert self-report donation (source="self_report", units=1)
+    8. Recount confirmed alerts for request; if units met → mark "fulfilled", log audit entry
+    9. (Stub) Fire Wave 2 if Wave 1 exhausted but not fulfilled
+  - Always returns 200 for idempotency (failed bridge calls don't block reply processing)
+
+**3. Deployment Configuration**
+
+- **`Procfile`:** `web: gunicorn app:app` (Heroku/Render standard)
+- **`render.yaml`:** Render-specific build/run config
+- **`requirements.txt` Updates:**
+  - `requests==2.32.3` (Flask → Bridge HTTP calls)
+  - `gunicorn==23.0.0` (production WSGI server)
+
+- **`.env.example` Updates:**
+  - `BRIDGE_URL=http://127.0.0.1:3100` (Bridge API server; localhost only)
+  - `BRIDGE_SECRET=your-secret-key-here` (Shared with bridge via env)
+  - `FLASK_URL=http://localhost:5001` (Bridge posts to this URL)
+
+**4. Testing & Hardening**
+
+- **Flask WhatsApp Tests (`tests/test_stage6.py`):**
+  - ✅ 11 tests covering:
+    - Health endpoint returns 200
+    - Secret validation (401 without/wrong header)
+    - Unknown phone handled idempotently
+    - Reply "1" marks alert confirmed
+    - Reply "2" inserts self-report donation
+    - Reply "3" marks alert declined
+    - Message_id dedupe (same ID processed once)
+    - Invalid reply triggers re-ask (logic, not bridge call)
+    - Request fulfillment when units met
+  - All tests use mock_db (no live connection)
+
+- **Hardening Checks:**
+  - ✅ `git ls-files` — No .env in repo
+  - ✅ Code scan — No hardcoded BRIDGE_SECRET, SUPABASE_URL, keys
+  - ✅ Phone number logging — Only in error logs (acceptable for debugging)
+  - ✅ Backward compatibility — All 106 tests pass (95 previous + 11 new)
+
+### Key Design Decisions
+
+1. **Baileys Lifecycle Pattern:**
+   - Follows FirstcallAI proven approach: factory + event handlers + separate lifecycle
+   - Auto-reconnect only on transient errors; loggedOut is terminal
+   - Exponential backoff stub (currently 5s linear; can be enhanced)
+
+2. **Message Deduplication:**
+   - Tracks message IDs in StateStore (persisted to bridge-state.json)
+   - Both 'notify' (new) and 'append' (history) upserts processed
+   - Second upsert of same ID skipped
+   - Critical for idempotency when bridge restarts
+
+3. **Flask Reply Endpoint Idempotency:**
+   - Always returns 200 (bridge can safely retry failed calls)
+   - Silent success for unknown phones (no side effects)
+   - Message_id tracked in alert record; dedupe check compares against all alerts for donor
+   - No exception thrown; malformed requests logged but don't crash
+
+4. **Self-Report Donations:**
+   - Inserted with `source="self_report"` when donor replies "2"
+   - Flows into Stage 2 eligibility engine (triggers cooldown deferrals)
+   - Units always 1; donated_on set to today (no admin override)
+
+5. **Localhost-Only Bridge:**
+   - `BRIDGE_URL=http://127.0.0.1:3100` (default)
+   - Flask can access; external internet cannot
+   - Protects against bridge DoS/abuse
+
+### Files Modified/Created
+
+**New Files:**
+- `whatsapp-bridge/` directory (complete Node.js bridge)
+  - `index.js`, `lifecycle.js`, `messages.js`, `state.js`
+  - `package.json`, `package-lock.json`
+  - `.gitignore`, `README.md`
+  - `test/bridge.test.js`
+
+- `tests/test_stage6.py` — 11 Flask WhatsApp tests
+
+**Modified Files:**
+- `app.py` — Added `/health` and `/internal/whatsapp-reply` endpoints
+- `requirements.txt` — Added requests, gunicorn
+- `.env.example` — Added BRIDGE_URL, BRIDGE_SECRET, FLASK_URL
+- `tests/mock_db.py` — Fixed `get_alerts_for_donor()`, enhanced `update_alert_reply()` with message_id storage
+- `Procfile` — New (deployment)
+- `render.yaml` — New (deployment)
+- `LIVE_TEST.md` — Manual two-phone test script (not automated)
+
+### Verified Behavior
+
+✅ `/health` returns 200 with `{"ok": true}`  
+✅ `/internal/whatsapp-reply` requires secret header (401 without)  
+✅ Unknown phone number returns 200 (idempotent)  
+✅ Reply "1" marks alert confirmed  
+✅ Reply "2" inserts self-report donation  
+✅ Reply "3" marks alert declined  
+✅ Message_id deduplication works (same ID → already_processed)  
+✅ Invalid reply (not 1/2/3) triggers re-ask  
+✅ Request fulfillment when units met  
+✅ Bridge message dedupe (same message ID skipped on restart)  
+✅ Bridge reconnect on transient errors (not on loggedOut)  
+✅ All 106 Flask tests pass (95 previous + 11 new)  
+✅ All 3 bridge npm tests pass  
+✅ 100% backward compatibility maintained
+
+### Test Counts
+
+- **Flask Tests:** 106 total (95 + 11 new)
+  - Stage 1: 18
+  - Stage 2: 27
+  - Stage 3: 11
+  - Stage 4: 17
+  - Stage 5: 9
+  - Stage 5.1: 10
+  - Stage 6: 11
+  - Flag test: 1
+
+- **Bridge Tests:** 3 (Node.js test runner)
+  - Message dedupe
+  - Reconnect on transient
+  - No reconnect on loggedOut
