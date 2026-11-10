@@ -328,6 +328,43 @@ def request_status(request_id):
         ],
     )
 
+
+def _confirmation_status(request_obj):
+    """Return the receiver-safe, confirmation-ordered donor state."""
+    confirmed = []
+    for alert in db.get_alerts_for_request(request_obj["id"]):
+        if alert.get("reply") != "confirmed":
+            continue
+        donor = db.get_donor(alert["donor_id"])
+        if donor:
+            confirmed.append({
+                "donor_name": donor.get("name", ""),
+                "blood_group": donor.get("blood_group", ""),
+                "donor_phone": donor.get("phone", ""),
+                "_order": alert.get("replied_at") or alert.get("created_at") or "",
+                "_alert_id": alert.get("id", 0),
+            })
+    confirmed.sort(key=lambda donor: (donor["_order"], donor["_alert_id"]))
+    for donor in confirmed:
+        donor.pop("_order", None)
+        donor.pop("_alert_id", None)
+    return {
+        "status": request_obj.get("status"),
+        "units_needed": int(float(request_obj.get("units", 0) or 0)),
+        "confirmed_count": len(confirmed),
+        "confirmed": confirmed,
+    }
+
+
+@app.route("/request/<int:request_id>/status.json")
+def request_status_json(request_id):
+    request_obj = db.get_request(request_id)
+    if not request_obj:
+        return jsonify({"error": "Request not found"}), 404
+    _maybe_auto_advance(request_id)
+    request_obj = db.get_request(request_id)
+    return jsonify(_confirmation_status(request_obj))
+
 # === STAGE 5 VERIFICATION WORKFLOW ===
 
 @app.route("/request/<int:request_id>/verify", methods=["POST"])

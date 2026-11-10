@@ -92,3 +92,36 @@ def test_cross_group_two_step_flow_completes(client):
     assert first.status_code == 200
     assert second.status_code == 200
     assert mock_db.get_alerts_for_request(req["id"])[0]["reply"] == "confirmed"
+
+
+def test_status_json_contract_empty_then_confirmed_donor(client):
+    confirmed = donor("Confirmed Donor", "A+", "Kathmandu", "919876543211")
+    req = request_for()
+    with patch("app.requests.post", return_value=MagicMock(status_code=200)):
+        client.post(f"/request/{req['id']}/activate?staff=1&channel=whatsapp")
+    empty = client.get(f"/request/{req['id']}/status.json")
+    assert empty.status_code == 200
+    assert empty.get_json()["confirmed"] == []
+    assert empty.get_json()["confirmed_count"] == 0
+
+    alert = mock_db.get_alerts_for_request(req["id"])[0]
+    mock_db.update_alert_reply(alert["id"], "confirmed", stage="done")
+    confirmed_response = client.get(f"/request/{req['id']}/status.json")
+    payload = confirmed_response.get_json()
+    assert payload["confirmed_count"] == 1
+    assert payload["units_needed"] == 1
+    assert payload["confirmed"] == [{
+        "donor_name": confirmed["name"],
+        "blood_group": confirmed["blood_group"],
+        "donor_phone": confirmed["phone"],
+    }]
+
+
+def test_status_page_contains_live_confirmation_poller_and_popup(client):
+    req = request_for()
+    response = client.get(f"/request/{req['id']}")
+    html = response.data.decode()
+    assert "/status.json" in html
+    assert "setInterval(pollStatus, 5000)" in html
+    assert "A donor has confirmed!" in html
+    assert "confirmation-popup-dismiss" in html

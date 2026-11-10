@@ -94,6 +94,106 @@
     <div class="alert">This request is closed.</div>
 {% endif %}
 
+<section id="confirmed-donors" aria-live="polite">
+    <h2>Confirmed donors</h2>
+    <p id="confirmed-donors-empty" {% if not confirmed_donors %}style="display: block;"{% else %}style="display: none;"{% endif %}>
+        No donors have confirmed yet.
+    </p>
+    <ul id="confirmed-donors-list">
+        {% for donor in confirmed_donors %}
+        <li data-donor-phone="{{ donor.phone }}">
+            {{ donor.name }} ({{ donor.blood_group }}) — Contact: {{ donor.phone }}
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+
+<div id="confirmation-popup" role="alertdialog" aria-live="assertive"
+     style="display: none; position: fixed; right: 20px; bottom: 20px; z-index: 10;
+            max-width:  min(90vw, 420px); padding: 18px; background: #fff;
+            border: 2px solid #28a745; border-radius: 8px; box-shadow: 0 4px 18px #0003;">
+    <button id="confirmation-popup-dismiss" type="button"
+            aria-label="Dismiss confirmation">×</button>
+    <p id="confirmation-popup-message"></p>
+</div>
+<div id="fulfilled-banner" class="alert" style="display: none;" role="status"></div>
+
+<script>
+(function () {
+    const requestId = {{ request.id|tojson }};
+    const terminalStates = new Set(["fulfilled", "closed", "expired"]);
+    const initialConfirmed = {{ confirmed_donors|length }};
+    let lastConfirmedCount = initialConfirmed;
+    let polling = true;
+    const list = document.getElementById("confirmed-donors-list");
+    const empty = document.getElementById("confirmed-donors-empty");
+    const popup = document.getElementById("confirmation-popup");
+    const popupMessage = document.getElementById("confirmation-popup-message");
+    const fulfilledBanner = document.getElementById("fulfilled-banner");
+    const popupQueue = [];
+
+    function renderConfirmed(donors) {
+        list.textContent = "";
+        donors.forEach(function (donor) {
+            const item = document.createElement("li");
+            item.dataset.donorPhone = donor.donor_phone;
+            item.textContent = donor.donor_name + " (" + donor.blood_group +
+                ") — Contact: " + donor.donor_phone;
+            list.appendChild(item);
+        });
+        empty.style.display = donors.length ? "none" : "block";
+    }
+
+    function showNextPopup() {
+        if (popup.style.display !== "none" || popupQueue.length === 0) return;
+        const message = popupQueue.shift();
+        popupMessage.textContent = message;
+        popup.style.display = "block";
+    }
+
+    document.getElementById("confirmation-popup-dismiss").addEventListener("click", function () {
+        popup.style.display = "none";
+        showNextPopup();
+    });
+
+    function pollStatus() {
+        if (!polling) return;
+        fetch("/request/" + requestId + "/status.json")
+            .then(function (response) {
+                if (!response.ok) throw new Error("status request failed");
+                return response.json();
+            })
+            .then(function (state) {
+                renderConfirmed(state.confirmed);
+                if (state.confirmed_count > lastConfirmedCount) {
+                    state.confirmed.slice(lastConfirmedCount, state.confirmed_count)
+                        .forEach(function (donor) {
+                            popupQueue.push("🎉 A donor has confirmed! " + donor.donor_name +
+                                " (" + donor.blood_group + ") is coming to donate. Contact: " +
+                                donor.donor_phone);
+                        });
+                    showNextPopup();
+                }
+                lastConfirmedCount = state.confirmed_count;
+                if (state.confirmed_count >= state.units_needed &&
+                    state.units_needed > 0) {
+                    fulfilledBanner.textContent = "✅ Your request is fulfilled — " +
+                        state.confirmed_count + " donor(s) confirmed.";
+                    fulfilledBanner.style.display = "block";
+                }
+                if (terminalStates.has(state.status)) polling = false;
+            })
+            .catch(function () {
+                // Polling errors are transient; retry on the next interval.
+            });
+    }
+
+    if (!terminalStates.has({{ request.status|tojson }})) {
+        window.setInterval(pollStatus, 5000);
+    }
+})();
+</script>
+
 <div class="link-group" style="margin-top: 20px;">
     <a href="/">← Back to Home</a>
 </div>
