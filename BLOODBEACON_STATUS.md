@@ -1318,3 +1318,14 @@ existing completed close. When fulfilment occurs, remaining active donors get a
 single stand-down message and `covered` outcome. Pool exhaustion leaves the
 request open with truthful `passed`/outcome accounting. The prior parallel-wave
 and standalone backfill behavior is superseded.
+
+## Receiver WhatsApp notifications
+
+When a donor confirms, the receiver receives one confirmation message through
+the same Flask-to-bridge path used for donor messages. When confirmed units
+reach the request target, the receiver receives one fulfilment message. Both
+notifications are best-effort, exactly-once per persisted alert/request flag,
+and simulator runs record the same message text in the audit outbox. Failed
+bridge sends do not alter donor outcomes and are recorded as
+`receiver_notify_failed`; the new flags are included in `schema.sql` and
+`migrations/live_sync.sql`.

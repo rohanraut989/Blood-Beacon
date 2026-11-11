@@ -84,6 +84,7 @@ def insert_request(patient_name, blood_group, component, units, hospital_name, c
         "status": "pending_verification",
         "created_by": created_by,
         "verified_by": None,
+        "fulfilled_notified": False,
         "created_at": "2024-01-01T00:00:00Z"
     }
     _test_requests[request["id"]] = request
@@ -206,6 +207,7 @@ def insert_alert(request_id, donor_id, wave_no, channel, match_tier=1, cross_gro
         "replied_at": None,
         "showed_up": None,
         "close_sent": False,
+        "receiver_notified": False,
         "created_at": "2024-01-01",  # Date format only for alerting.py parsing
     }
     _test_alerts[alert["id"]] = alert
@@ -251,6 +253,12 @@ def update_alert_close_sent(alert_id, close_sent=True):
         return _test_alerts[alert_id]
     return None
 
+def update_alert_receiver_notified(alert_id, notified=True):
+    if alert_id in _test_alerts:
+        _test_alerts[alert_id]["receiver_notified"] = notified
+        return _test_alerts[alert_id]
+    return None
+
 def cancel_alerts_for_request(request_id):
     cancelled = []
     for alert in _test_alerts.values():
@@ -268,6 +276,12 @@ def update_request_status(request_id, new_status, verified_by=None):
         _test_requests[request_id]["status"] = new_status
         if verified_by:
             _test_requests[request_id]["verified_by"] = verified_by
+        return _test_requests[request_id]
+    return None
+
+def update_request_fulfilled_notified(request_id, notified=True):
+    if request_id in _test_requests:
+        _test_requests[request_id]["fulfilled_notified"] = notified
         return _test_requests[request_id]
     return None
 

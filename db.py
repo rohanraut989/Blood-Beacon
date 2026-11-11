@@ -262,6 +262,14 @@ def update_alert_close_sent(alert_id: int, close_sent: bool = True) -> dict:
     }).eq("id", alert_id).execute()
     return result.data[0] if result.data else None
 
+def update_alert_receiver_notified(alert_id: int, notified: bool = True) -> dict:
+    """Record successful receiver notification delivery."""
+    db = get_db()
+    result = db.table("alerts").update({
+        "receiver_notified": notified,
+    }).eq("id", alert_id).execute()
+    return result.data[0] if result.data else None
+
 def cancel_alerts_for_request(request_id: int) -> list:
     result = get_db().table("alerts").update({
         "stage": "done",
@@ -278,6 +286,14 @@ def update_request_status(request_id: int, new_status: str, verified_by: str = N
     if verified_by:
         update_data["verified_by"] = verified_by
     result = db.table("requests").update(update_data).eq("id", request_id).execute()
+    return result.data[0] if result.data else None
+
+def update_request_fulfilled_notified(request_id: int, notified: bool = True) -> dict:
+    """Record successful fulfilment notification delivery."""
+    db = get_db()
+    result = db.table("requests").update({
+        "fulfilled_notified": notified,
+    }).eq("id", request_id).execute()
     return result.data[0] if result.data else None
 
 def update_request_match_pool_count(request_id: int, count: int) -> dict:

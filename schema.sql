@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS requests (
   created_by TEXT NOT NULL CHECK (created_by IN ('public', 'staff')),
   verified_by TEXT,
   match_pool_count INT,
+  fulfilled_notified BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -71,12 +72,15 @@ CREATE TABLE IF NOT EXISTS alerts (
   replied_at TIMESTAMP WITH TIME ZONE,
   showed_up BOOLEAN,
   close_sent BOOLEAN NOT NULL DEFAULT FALSE,
+  receiver_notified BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_alerts_request_id ON alerts(request_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_donor_id ON alerts(donor_id);
 ALTER TABLE alerts ADD COLUMN IF NOT EXISTS close_sent BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS receiver_notified BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS fulfilled_notified BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- rules table (NBTC rulebook)
 CREATE TABLE IF NOT EXISTS rules (

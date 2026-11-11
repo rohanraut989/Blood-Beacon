@@ -365,6 +365,12 @@ def _evaluate_cascade(request_id, channel=None):
     if confirmed >= units:
         db.update_request_status(request_id, "fulfilled")
         _stand_down_active_alerts(req, db.get_alerts_for_request(request_id))
+        channel = next(
+            (alert.get("channel") for alert in db.get_alerts_for_request(request_id)
+             if alert.get("channel")),
+            "whatsapp",
+        )
+        _notify_receiver_fulfillment(req, channel=channel)
         db.insert_audit_log(
             actor="system",
             action="request_fulfilled",
@@ -604,6 +610,7 @@ def fulfill_public_request(request_id):
     if not req or req.get("status") != "active":
         return redirect(url_for("request_status", request_id=request_id))
     db.update_request_status(request_id, "fulfilled")
+    _notify_receiver_fulfillment(req)
     db.insert_audit_log(
         actor="receiver",
         action="fulfill_request",
@@ -846,6 +853,102 @@ def _send_conversation_close(donor, req, alert, outcome):
     )
     return False
 
+
+def _receiver_confirmation_message(donor, req):
+    status_page_url = url_for("request_status", request_id=req["id"], _external=True)
+    return (
+        f"Good news! {donor.get('name', 'A donor')} ({donor.get('blood_group')}) "
+        f"has accepted your request and confirmed to donate for {req.get('patient_name')} "
+        f"at {req.get('hospital_name')}, {req.get('city')}. Donor's number: "
+        f"{donor.get('phone')}. You can contact the donor directly now. Track your "
+        f"request: {status_page_url} — BloodBeacon"
+    )
+
+
+def _notify_receiver_confirmation(donor, req, alert):
+    """Best-effort, exactly-once receiver notification for one confirmation."""
+    if alert.get("receiver_notified"):
+        return
+    message = _receiver_confirmation_message(donor, req)
+    try:
+        sent = (
+            db.insert_audit_log(
+                actor="simulator",
+                action="receiver_notified",
+                entity="alert",
+                entity_id=alert["id"],
+                detail=message,
+            )
+            if alert.get("channel") == "simulator"
+            else _send_whatsapp_message(req.get("contact_phone"), message)
+        )
+        if alert.get("channel") != "simulator" and not sent:
+            db.insert_audit_log(
+                actor="whatsapp_system",
+                action="receiver_notify_failed",
+                entity="alert",
+                entity_id=alert["id"],
+                detail=message,
+            )
+            return
+        try:
+            db.update_alert_receiver_notified(alert["id"])
+        except Exception as error:
+            print(f"Receiver notification flag update failed for alert {alert['id']}: {error}")
+    except Exception as error:
+        db.insert_audit_log(
+            actor="whatsapp_system",
+            action="receiver_notify_failed",
+            entity="alert",
+            entity_id=alert["id"],
+            detail=f"{message} ({error})",
+        )
+
+
+def _fulfillment_message(req):
+    units = format_unit_int(req.get("units"))
+    return (
+        f"All {units} unit(s) for {req.get('patient_name')} are now confirmed — "
+        "your BloodBeacon request is fulfilled. Wishing a speedy recovery. 🙏"
+    )
+
+
+def _notify_receiver_fulfillment(req, channel="whatsapp", source_alert=None):
+    """Best-effort, exactly-once fulfilment notification for a request."""
+    if req.get("fulfilled_notified"):
+        return
+    message = _fulfillment_message(req)
+    try:
+        if channel == "simulator":
+            db.insert_audit_log(
+                actor="simulator",
+                action="fulfilled_notified",
+                entity="request",
+                entity_id=req["id"],
+                detail=message,
+            )
+        elif not _send_whatsapp_message(req.get("contact_phone"), message):
+            db.insert_audit_log(
+                actor="whatsapp_system",
+                action="receiver_notify_failed",
+                entity="request",
+                entity_id=req["id"],
+                detail=message,
+            )
+            return
+        try:
+            db.update_request_fulfilled_notified(req["id"])
+        except Exception as error:
+            print(f"Fulfilment notification flag update failed for request {req['id']}: {error}")
+    except Exception as error:
+        db.insert_audit_log(
+            actor="whatsapp_system",
+            action="receiver_notify_failed",
+            entity="request",
+            entity_id=req["id"],
+            detail=f"{message} ({error})",
+        )
+
 def _send_whatsapp_message(phone, message):
     """Send one donor-facing WhatsApp message through the bridge."""
     try:
@@ -907,6 +1010,8 @@ def _advance_cascade_simulation(request_id):
             outcome = "confirmed" if reply == "confirmed" else "declined"
             db.update_alert_reply(alert["id"], outcome, stage="done")
             _send_conversation_close(donor, req, alert, outcome)
+            if outcome == "confirmed":
+                _notify_receiver_confirmation(donor, req, alert)
     _evaluate_cascade(request_id, channel="simulator")
 
 @app.route("/request/<int:request_id>/advance", methods=["POST"])
@@ -1627,6 +1732,7 @@ def whatsapp_reply():
                 _send_conversation_close(
                     donor, request_obj, matching_alert, "confirmed"
                 )
+                _notify_receiver_confirmation(donor, request_obj, matching_alert)
             elif processed_reply == "declined":
                 _send_conversation_close(
                     donor, request_obj, matching_alert, "declined"
